@@ -16,7 +16,7 @@ A practical first deployment is:
 - **UI:** the existing React components and `theme.css`
 - **Server:** framework server routes (Next.js/Remix/Hono are all viable)
 - **Database:** Postgres on Neon or Supabase
-- **AI:** one server-only provider adapter; Gemini can be the first implementation
+- **AI:** one server-only multi-provider adapter with automatic fallback (already scaffolded in `standalone/ai/`; Gemini, OpenAI, Anthropic, DeepSeek)
 - **Schedules:** Vercel Cron, GitHub Actions, or the host's job scheduler
 - **Secrets:** deployment environment variables, never browser variables
 
@@ -28,12 +28,12 @@ Keep the client-facing action contract stable while replacing the transport. The
 | --- | --- |
 | `defineAction` | authenticated server route / RPC procedure |
 | `ctx.db` | Drizzle Postgres client |
-| `ctx.inference.complete` | `AiProvider.completeStructured()` on the server |
+| `ctx.inference.complete` | `createAIClient(process.env).complete()` from `standalone/ai/` on the server |
 | `ctx.tool.webSearch` | approved search/news ingestion provider on the server |
 | `ctx.invalidateQueries` | API response + React Query invalidation |
 | managed artifact schedules | host cron calling protected internal routes |
 
-Do not call Gemini, the database, or upstream news APIs directly from the browser.
+Do not call AI providers, the database, or upstream news APIs directly from the browser.
 
 ## 4. Database migration
 
@@ -49,19 +49,23 @@ Large JSON payloads are stored as `jsonb` in Postgres. Validate them with the sa
 
 ## 5. AI provider adapter
 
-Expose one internal interface rather than using Gemini throughout route code:
+A ready-to-port multi-provider adapter lives in `standalone/ai/` (see its
+`README.md`). It exposes one internal client with automatic fallback:
 
 ```ts
-export interface AiProvider {
-  completeStructured<T>(input: {
-    instruction: string;
-    schemaName: string;
-    schema: unknown;
-  }): Promise<T>;
-}
+import { createAIClient } from "./standalone/ai/index.js";
+
+const ai = createAIClient(process.env); // reads AI_PROVIDERS priority order
+const raw = await ai.complete(prompt, zodToJsonSchema(myZodSchema));
+const parsed = myZodSchema.parse(raw);
 ```
 
-The Gemini implementation reads `GEMINI_API_KEY` and `GEMINI_MODEL` only on the server. Keep deterministic fallback behavior from the current artifact: sourced stories still render when classification is unavailable; saved daily/weekly reports remain visible and are marked stale if regeneration fails.
+`AI_PROVIDERS=gemini,openai,anthropic,deepseek` sets the attempt order; only
+providers with an API key configured are tried. If one fails (quota, network,
+bad key, empty response), the next is tried automatically, and an aggregated
+error is thrown only when all fail. Port the four `ctx.inference.complete`
+call sites in `server/src/actions.ts` (news classification, calendar/unlock
+extraction, daily Market Update, weekly digest) to this client.
 
 Recommended guardrails:
 
@@ -100,7 +104,7 @@ Do not turn browser notifications into a promise of background push. True backgr
 1. Deploy a read-only market dashboard against public sources.
 2. Add Postgres caching and scheduled market refresh.
 3. Add authenticated personal state.
-4. Add Gemini-backed bilingual summaries and reports.
+4. Add multi-provider AI-backed bilingual summaries and reports (`standalone/ai/`, fallback chain).
 5. Add notification delivery only after subscription and consent flows exist.
 6. Compare standalone outputs with the current artifact, then switch traffic deliberately.
 

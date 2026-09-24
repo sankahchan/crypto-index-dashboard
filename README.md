@@ -30,9 +30,9 @@ bun run typecheck
 
 The artifact must be built and published through Muse's web-artifact build flow; `bun run build` only creates local bundles.
 
-## AI: when is Gemini needed?
+## AI: when is it needed, and which provider?
 
-Gemini is **not** needed for prices, charts, the Market Pulse formula, portfolio math, alerts, DCA calculations, derivatives, or on-chain data. Those features use deterministic code and public data sources.
+AI is **not** needed for prices, charts, the Market Pulse formula, portfolio math, alerts, DCA calculations, derivatives, or on-chain data. Those features use deterministic code and public data sources.
 
 A standalone deployment does need an AI provider for:
 
@@ -42,7 +42,9 @@ A standalone deployment does need an AI provider for:
 - the weekly digest
 - extracting dated calendar and token-unlock rows from retrieved source material
 
-The Muse-hosted artifact already receives inference through `ctx.inference`; do not add a Gemini key to the current source. During a standalone migration, create one server-only AI adapter and set the variables shown in `.env.example`. Never expose `GEMINI_API_KEY` in client code or commit a real key.
+Four providers are supported with automatic fallback, in your chosen priority order (`AI_PROVIDERS` in `.env.example`): **Gemini**, **OpenAI (ChatGPT)**, **Anthropic (Claude)**, **DeepSeek**. If one fails — quota, network, bad key, empty response — the next is tried automatically; an error is raised only when all fail. The ready-to-port adapter lives in `standalone/ai/` (see its README).
+
+The Muse-hosted artifact already receives inference through `ctx.inference`; do not add API keys to the current source. During a standalone migration, wire `createAIClient(process.env)` into the four `ctx.inference.complete` call sites and set the keys shown in `.env.example`. Never expose API keys in client code or commit a real key.
 
 ## Data and secrets
 
@@ -57,7 +59,7 @@ The Muse-hosted artifact already receives inference through `ctx.inference`; do 
 - [ ] Create Postgres (for example Neon or Supabase)
 - [ ] Port typed Muse actions to authenticated HTTP/server handlers
 - [ ] Replace SQLite Drizzle tables with Postgres tables
-- [ ] Replace `ctx.inference` with a server-only AI adapter
+- [ ] Port `ctx.inference` call sites to the multi-provider AI adapter in `standalone/ai/` (Gemini/OpenAI/Claude/DeepSeek with fallback)
 - [ ] Add durable job locking/idempotency for scheduled refreshes
 - [ ] Configure hourly, daily, and weekly cron triggers
 - [ ] Add authentication before importing personal portfolio data
