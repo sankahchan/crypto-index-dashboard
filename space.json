@@ -1,0 +1,12 @@
+{
+  "entry": "client/dist/index.html",
+  "managedCronJobs": [
+    "crypto-index-dashboard-2-hourly-refresh",
+    "crypto-index-dashboard-2-daily-market-update",
+    "crypto-index-dashboard-2-weekly-digest"
+  ],
+  "name": "Crypto Index Dashboard (Live)",
+  "platformVersion": 21,
+  "runtime": "typescript",
+  "slug": "crypto-index-dashboard-2"
+}
