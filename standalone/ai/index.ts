@@ -30,7 +30,7 @@ function readSettings(env: EnvLike, name: keyof AIEnv): ProviderSettings {
   const key = (suffix: string) => env[`${upper}_${suffix}`]?.trim() ?? "";
   return {
     apiKey: key("API_KEY"),
-    model: key("MODEL") || DEFAULT_MODELS[String(name)],
+    model: key("MODEL") || DEFAULT_MODELS[String(name)] || "",
     baseUrl: key("BASE_URL") || undefined,
   };
 }
@@ -86,7 +86,9 @@ export function createAIClient(env: EnvLike): AIClient {
       for (const name of active) {
         const settings = config[name as keyof Omit<AIEnv, "providers" | "timeoutMs">] as ProviderSettings;
         try {
-          return await PROVIDERS[name](prompt, jsonSchema, settings, timeoutMs);
+          const provider = PROVIDERS[name];
+          if (!provider) continue;
+          return await provider(prompt, jsonSchema, settings, timeoutMs);
         } catch (error) {
           failures.push(error instanceof Error ? error.message : String(error));
         }

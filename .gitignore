@@ -4,6 +4,7 @@ node_modules/
 client/dist/
 client/dist-cvm/
 server/dist/
+standalone/server/.build/
 .space-build/
 .space-build-cvm/
 

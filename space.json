@@ -6,7 +6,7 @@
     "crypto-index-dashboard-2-weekly-digest"
   ],
   "name": "Crypto Index Dashboard (Live)",
-  "platformVersion": 21,
+  "platformVersion": 22,
   "runtime": "typescript",
   "slug": "crypto-index-dashboard-2"
 }

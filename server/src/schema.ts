@@ -79,6 +79,7 @@ export const portfolioHoldings = sqliteTable(
     quantity: real("quantity").notNull(),
     averageCost: real("average_cost"),
     manualPrice: real("manual_price"),
+    acquiredOn: text("acquired_on"),
     createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
     updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
   },
@@ -90,8 +91,23 @@ export const notificationPreferences = sqliteTable("notification_preferences", {
   priceAlerts: integer("price_alerts", { mode: "boolean" }).notNull().default(false),
   marketAlerts: integer("market_alerts", { mode: "boolean" }).notNull().default(false),
   weeklyDigest: integer("weekly_digest", { mode: "boolean" }).notNull().default(false),
+  signalAlerts: integer("signal_alerts", { mode: "boolean" }).notNull().default(false),
   updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
 });
+
+export const tradingSignalEvents = sqliteTable(
+  "trading_signal_events",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    symbol: text("symbol").notNull(),
+    previousVerdict: text("previous_verdict").notNull(),
+    newVerdict: text("new_verdict").notNull(),
+    confidence: integer("confidence").notNull(),
+    triggeredAt: integer("triggered_at", { mode: "timestamp_ms" }).notNull(),
+    dismissed: integer("dismissed", { mode: "boolean" }).notNull().default(false),
+  },
+  (table) => [index("trading_signal_events_triggered_at_idx").on(table.triggeredAt)],
+);
 
 export const weeklyMarketDigests = sqliteTable(
   "weekly_market_digests",
@@ -102,4 +118,16 @@ export const weeklyMarketDigests = sqliteTable(
     payload: text("payload").notNull(),
   },
   (table) => [index("weekly_market_digests_generated_at_idx").on(table.generatedAt)],
+);
+
+export const tradingSignalSnapshots = sqliteTable(
+  "trading_signal_snapshots",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    symbol: text("symbol").notNull(),
+    generatedAt: integer("generated_at", { mode: "timestamp_ms" }).notNull(),
+    marketAsOf: integer("market_as_of", { mode: "timestamp_ms" }).notNull(),
+    payload: text("payload").notNull(),
+  },
+  (table) => [index("trading_signal_snapshots_symbol_generated_at_idx").on(table.symbol, table.generatedAt)],
 );

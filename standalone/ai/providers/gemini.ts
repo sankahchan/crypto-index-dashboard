@@ -1,4 +1,4 @@
-import { extractJson, joinParts, postJson, SYSTEM_PROMPT, withSchemaInstruction } from "../http.js";
+import { extractJson, joinParts, postJson, SYSTEM_PROMPT } from "../http.js";
 import type { ProviderSettings } from "../types.js";
 
 interface GeminiResponse {

@@ -51,6 +51,23 @@ const derivativeSchema = z.object({
   source: z.string(),
 });
 
+const etfFlowSchema = z.object({
+  date: z.string(),
+  asset: z.enum(["BTC", "ETH"]),
+  netFlowUsd: z.number(),
+  source: z.string(),
+  url: z.string(),
+});
+
+const liquidationLevelSchema = z.object({
+  priceUsd: z.number().positive(),
+  side: z.enum(["long_below", "short_above"]),
+  magnitudeUsd: z.number().positive(),
+  timeframe: z.string(),
+  source: z.string(),
+  url: z.string(),
+});
+
 const onChainSchema = z.object({
   mvrv: z.number().nullable(),
   exchangeInflowBtc: z.number().nullable(),
@@ -108,9 +125,19 @@ const dashboardSchema = z.object({
   whaleCoverage: z.array(newsItemSchema),
   whaleThresholdBtc: z.number(),
   derivatives: z.array(derivativeSchema),
+  etfFlows: z.array(etfFlowSchema).default([]),
+  liquidationLevels: z.array(liquidationLevelSchema).default([]),
   onChain: onChainSchema.nullable(),
   economicCalendar: z.array(calendarItemSchema),
   tokenUnlocks: z.array(unlockItemSchema),
+  marketIntelligenceStatus: z.object({
+    derivatives: z.enum(["ok", "unavailable"]),
+    etfFlows: z.enum(["ok", "empty", "unavailable"]).optional(),
+    liquidations: z.enum(["ok", "empty", "unavailable"]).optional(),
+    economicCalendar: z.enum(["ok", "empty", "unavailable"]),
+    tokenUnlocks: z.enum(["ok", "empty", "unavailable"]),
+    refreshedAt: z.string(),
+  }).optional(),
   configuredNewsSources: z.array(z.string()),
   sources: z.array(z.string()),
 });
@@ -153,8 +180,18 @@ const holdingSchema = z.object({
   quantity: z.number(),
   averageCost: z.number().nullable(),
   manualPrice: z.number().nullable(),
+  acquiredOn: z.string().nullable(),
   createdAt: z.string(),
   updatedAt: z.string(),
+});
+
+const tradingSignalEventSchema = z.object({
+  id: z.number().int(),
+  symbol: z.string(),
+  previousVerdict: z.string(),
+  newVerdict: z.string(),
+  confidence: z.number().int(),
+  triggeredAt: z.string(),
 });
 
 const settingsSchema = z.object({
@@ -163,8 +200,9 @@ const settingsSchema = z.object({
   alerts: z.array(alertSchema),
   marketAlerts: z.object({ extremeFear: z.boolean(), extremeGreed: z.boolean() }),
   marketAlertEvents: z.array(marketAlertEventSchema),
+  signalEvents: z.array(tradingSignalEventSchema),
   holdings: z.array(holdingSchema),
-  notifications: z.object({ priceAlerts: z.boolean(), marketAlerts: z.boolean(), weeklyDigest: z.boolean() }),
+  notifications: z.object({ priceAlerts: z.boolean(), marketAlerts: z.boolean(), weeklyDigest: z.boolean(), signalAlerts: z.boolean() }),
 });
 
 type Settings = z.infer<typeof settingsSchema>;
@@ -222,6 +260,35 @@ const binanceOpenInterestSchema = z.object({
   time: z.number().optional(),
 });
 
+const okxFundingSchema = z.object({
+  code: z.string(),
+  data: z.array(z.object({ fundingRate: z.string(), fundingTime: z.string() })),
+});
+
+const okxOpenInterestSchema = z.object({
+  code: z.string(),
+  data: z.array(z.object({ oiUsd: z.string(), ts: z.string() })),
+});
+
+const okxTickerSchema = z.object({
+  code: z.string(),
+  data: z.array(z.object({ last: z.string(), ts: z.string() })),
+});
+
+const bybitTickerSchema = z.object({
+  retCode: z.number(),
+  result: z.object({
+    list: z.array(z.object({
+      symbol: z.string(),
+      markPrice: z.string(),
+      fundingRate: z.string(),
+      nextFundingTime: z.string(),
+      openInterest: z.string(),
+      openInterestValue: z.string(),
+    })),
+  }),
+});
+
 const coinMetricsSchema = z.object({
   data: z.array(z.object({
     time: z.string(),
@@ -233,8 +300,8 @@ const coinMetricsSchema = z.object({
   }).passthrough()),
 }).passthrough();
 
-const researchExtractionSchema = z.object({
-  economicEvents: z.array(z.object({
+const economicExtractionSchema = z.object({
+  events: z.array(z.object({
     resultIndex: z.number().int(),
     title: z.string(),
     date: z.string(),
@@ -242,7 +309,10 @@ const researchExtractionSchema = z.object({
     whyItMattersMm: z.string(),
     whyItMattersEn: z.string(),
   })).max(6),
-  tokenUnlocks: z.array(z.object({
+});
+
+const unlockExtractionSchema = z.object({
+  events: z.array(z.object({
     resultIndex: z.number().int(),
     token: z.string(),
     date: z.string(),
@@ -259,6 +329,26 @@ const newsClassificationSchema = z.object({
     summaryMm: z.string(),
     summaryEn: z.string(),
   })).max(8),
+});
+
+const etfFlowExtractionSchema = z.object({
+  rows: z.array(z.object({
+    resultIndex: z.number().int(),
+    date: z.string(),
+    asset: z.enum(["BTC", "ETH"]),
+    netFlowUsd: z.number(),
+  })).max(12),
+});
+
+const liquidationExtractionSchema = z.object({
+  levels: z.array(z.object({
+    resultIndex: z.number().int(),
+    priceUsd: z.number().positive(),
+    side: z.enum(["long_below", "short_above"]),
+    magnitudeUsd: z.number().positive(),
+    timeframe: z.string(),
+    publishedDate: z.string(),
+  })).max(10),
 });
 
 const bilingualTextSchema = z.object({
@@ -351,6 +441,67 @@ const weeklyDigestResultSchema = z.object({
 
 type WeeklyDigestResult = z.infer<typeof weeklyDigestResultSchema>;
 
+const tradingSignalValueSchema = z.enum(["buy", "neutral", "sell"]);
+const tradingVerdictSchema = z.enum(["strong_buy", "buy", "neutral", "sell", "strong_sell"]);
+const timeframeIndicatorsSchema = z.object({
+  label: z.enum(["1H", "4H", "1D"]),
+  technicalScore: z.number().int().min(0).max(100),
+  verdict: tradingSignalValueSchema,
+  candleAsOf: z.string(),
+  indicators: z.object({
+    rsi: z.object({ value: z.number(), signal: tradingSignalValueSchema }),
+    macd: z.object({ macd: z.number(), signalLine: z.number(), histogram: z.number(), signal: tradingSignalValueSchema }),
+    movingAverage: z.object({ fast: z.number(), slow: z.number(), signal: tradingSignalValueSchema }),
+  }),
+});
+
+const tradingSignalSchema = z.object({
+  symbol: z.enum(["BTC", "ETH", "SOL"]),
+  name: z.string(),
+  generatedAt: z.string(),
+  marketAsOf: z.string(),
+  price: z.number(),
+  changePct: z.number(),
+  verdict: tradingVerdictSchema,
+  confidence: z.number().int().min(0).max(100),
+  technicalScore: z.number().int().min(0).max(100),
+  aiScore: z.number().int().min(0).max(100),
+  timeframes: z.object({
+    oneHour: timeframeIndicatorsSchema,
+    fourHour: timeframeIndicatorsSchema,
+    oneDay: timeframeIndicatorsSchema,
+  }).optional(),
+  indicators: z.object({
+    rsi: z.object({ value: z.number(), signal: tradingSignalValueSchema }),
+    macd: z.object({ macd: z.number(), signalLine: z.number(), histogram: z.number(), signal: tradingSignalValueSchema }),
+    movingAverage: z.object({ fast: z.number(), slow: z.number(), signal: tradingSignalValueSchema }),
+  }),
+  news: z.object({ score: z.number().int().nullable(), total: z.number().int() }),
+  onChain: z.object({ available: z.boolean(), score: z.number().int().nullable(), detailMm: z.string(), detailEn: z.string() }),
+  rationale: bilingualTextSchema,
+  caution: bilingualTextSchema,
+  sources: z.array(z.string()),
+});
+
+type TradingSignal = z.infer<typeof tradingSignalSchema>;
+
+const tradingSignalResultSchema = z.object({
+  status: z.enum(["ok", "stale", "error"]),
+  data: tradingSignalSchema.nullable(),
+  message: z.string().nullable(),
+  messageEn: z.string().nullable(),
+});
+
+type TradingSignalResult = z.infer<typeof tradingSignalResultSchema>;
+
+const aiTradingSignalContentSchema = z.object({
+  verdict: tradingVerdictSchema,
+  score: z.number().int().min(0).max(100),
+  confidence: z.number().int().min(0).max(100),
+  rationale: bilingualTextSchema,
+  caution: bilingualTextSchema,
+});
+
 const cryptoCompareNewsSchema = z.object({
   Data: z.array(z.object({
     id: z.string().optional(),
@@ -400,7 +551,9 @@ const PRODUCTS = [
   { id: "APE-USD", symbol: "APE", name: "ApeCoin", tier: "low" },
 ] as const;
 
-const HEADERS = { "User-Agent": "MuseCryptoDashboard/1.1" };
+const HEADERS = { "User-Agent": "MuseCryptoDashboard/1.2" };
+const BLS_SCHEDULE_URL = "https://www.bls.gov/schedule/2026/";
+const TOKEN_UNLOCK_SCHEDULE_URL = "https://crypto-corner.com/2026/09/22/upcoming-token-unlocks-sep-oct-2026/";
 const WHALE_THRESHOLD_BTC = 10;
 const CONFIGURED_NEWS_SOURCES = ["The Block", "CryptoSlate", "crypto.news", "r/CryptoCurrency"] as const;
 const NAMED_SOURCE_FILTER = 'from The Block, CryptoSlate, crypto.news, and Reddit r/CryptoCurrency';
@@ -642,31 +795,136 @@ async function fetchWhaleCoverage(ctx: Ctx): Promise<{ items: z.infer<typeof new
 }
 
 async function fetchDerivatives(): Promise<z.infer<typeof derivativeSchema>[]> {
-  const pairs = ["BTCUSDT", "ETHUSDT", "SOLUSDT"];
-  const rows = await Promise.all(pairs.map(async (pair) => {
+  const symbols = ["BTC", "ETH", "SOL"];
+  const rows = await Promise.all(symbols.map(async (symbol) => {
+    const binancePair = `${symbol}USDT`;
     try {
       const [premiumRaw, openInterestRaw] = await Promise.all([
-        fetchJson(`https://fapi.binance.com/fapi/v1/premiumIndex?symbol=${pair}`),
-        fetchJson(`https://fapi.binance.com/fapi/v1/openInterest?symbol=${pair}`),
+        fetchJson(`https://fapi.binance.com/fapi/v1/premiumIndex?symbol=${binancePair}`),
+        fetchJson(`https://fapi.binance.com/fapi/v1/openInterest?symbol=${binancePair}`),
       ]);
       const premium = binancePremiumSchema.parse(premiumRaw);
       const openInterest = binanceOpenInterestSchema.parse(openInterestRaw);
-      const markPrice = finite(premium.markPrice, `${pair} mark price`);
-      const openInterestUnits = finite(openInterest.openInterest, `${pair} open interest`);
+      const markPrice = finite(premium.markPrice, `${binancePair} mark price`);
+      const openInterestUnits = finite(openInterest.openInterest, `${binancePair} open interest`);
       return {
-        symbol: pair.replace("USDT", ""),
+        symbol,
         markPrice,
-        fundingRate: finite(premium.lastFundingRate, `${pair} funding rate`),
+        fundingRate: finite(premium.lastFundingRate, `${binancePair} funding rate`),
         nextFundingTime: new Date(premium.nextFundingTime).toISOString(),
         openInterestUnits,
         openInterestUsd: openInterestUnits * markPrice,
         source: "Binance Futures",
       };
-    } catch (_error) {
-      return null;
+    } catch (_binanceError) {
+      try {
+        const bybitPair = `${symbol}USDT`;
+        const payload = bybitTickerSchema.parse(await fetchJson(
+          `https://api.bybit.com/v5/market/tickers?category=linear&symbol=${bybitPair}`,
+        ));
+        const row = payload.retCode === 0 ? payload.result.list[0] : undefined;
+        if (!row) throw new Error(`${bybitPair} ticker is unavailable`);
+        const markPrice = finite(row.markPrice, `${bybitPair} mark price`);
+        const openInterestUnits = finite(row.openInterest, `${bybitPair} open interest`);
+        const reportedOpenInterestUsd = finite(row.openInterestValue, `${bybitPair} open interest value`);
+        const nextFundingTime = finite(row.nextFundingTime, `${bybitPair} funding time`);
+        return {
+          symbol,
+          markPrice,
+          fundingRate: finite(row.fundingRate, `${bybitPair} funding rate`),
+          nextFundingTime: new Date(nextFundingTime).toISOString(),
+          openInterestUnits,
+          openInterestUsd: reportedOpenInterestUsd,
+          source: "Bybit Perpetuals",
+        };
+      } catch (_bybitError) {
+        try {
+          const okxPair = `${symbol}-USDT-SWAP`;
+          const [fundingPayload, interestPayload, tickerPayload] = await Promise.all([
+            fetchJson(`https://www.okx.com/api/v5/public/funding-rate?instId=${okxPair}`),
+            fetchJson(`https://www.okx.com/api/v5/public/open-interest?instType=SWAP&instId=${okxPair}`),
+            fetchJson(`https://www.okx.com/api/v5/market/ticker?instId=${okxPair}`),
+          ]);
+          const funding = okxFundingSchema.parse(fundingPayload);
+          const interest = okxOpenInterestSchema.parse(interestPayload);
+          const ticker = okxTickerSchema.parse(tickerPayload);
+          const fundingRow = funding.code === "0" ? funding.data[0] : undefined;
+          const interestRow = interest.code === "0" ? interest.data[0] : undefined;
+          const tickerRow = ticker.code === "0" ? ticker.data[0] : undefined;
+          if (!fundingRow || !interestRow || !tickerRow) return null;
+          const markPrice = finite(tickerRow.last, `${okxPair} last price`);
+          const openInterestUsd = finite(interestRow.oiUsd, `${okxPair} open interest USD`);
+          return {
+            symbol,
+            markPrice,
+            fundingRate: finite(fundingRow.fundingRate, `${okxPair} funding rate`),
+            nextFundingTime: new Date(finite(fundingRow.fundingTime, `${okxPair} funding time`)).toISOString(),
+            openInterestUnits: openInterestUsd / markPrice,
+            openInterestUsd,
+            source: "OKX Perpetuals",
+          };
+        } catch (_okxError) {
+          return null;
+        }
+      }
     }
   }));
   return rows.filter((row): row is NonNullable<typeof row> => row !== null);
+}
+
+async function fetchEtfFlows(ctx: Ctx): Promise<{ items: z.infer<typeof etfFlowSchema>[]; status: "ok" | "empty" | "unavailable" }> {
+  try {
+    const search = await ctx.tool.web_search(
+      "latest US spot Bitcoin ETF and Ethereum ETF daily net flows exact trading date USD SoSoValue Farside",
+      { language_code: "en", timeout_secs: 45 },
+    );
+    const rows = search.content.results.slice(0, 12);
+    if (rows.length === 0) return { items: [], status: "empty" };
+    const extracted = await ctx.inference.complete(
+      `Extract daily aggregate US spot ETF net flows for Bitcoin and Ethereum from the supplied search results. Require an explicit full calendar date and an explicit aggregate USD inflow or outflow. Convert millions or billions to signed USD numbers: inflow positive, outflow negative. Prefer finalized aggregate figures attributed to SoSoValue or Farside over preliminary partial fund totals. Return at most one row per asset and date and omit ambiguous or contradictory values. resultIndex is the zero-based source result index. Today is ${new Date().toISOString().slice(0, 10)} UTC.\n\n${JSON.stringify(rows)}`,
+      { schema: etfFlowExtractionSchema },
+    );
+    const seen = new Set<string>();
+    const items = extracted.rows.flatMap((item) => {
+      const source = rows[item.resultIndex];
+      const parsedDate = new Date(`${item.date}T00:00:00Z`);
+      const key = `${item.date}-${item.asset}`;
+      if (!source?.url || !/^https?:\/\//i.test(source.url) || !Number.isFinite(parsedDate.getTime()) || seen.has(key)) return [];
+      seen.add(key);
+      return [{ date: item.date, asset: item.asset, netFlowUsd: item.netFlowUsd, source: source.source?.trim() || "ETF flow report", url: source.url }];
+    }).sort((a, b) => b.date.localeCompare(a.date)).slice(0, 10);
+    return { items, status: items.length > 0 ? "ok" : "empty" };
+  } catch (_error) {
+    return { items: [], status: "unavailable" };
+  }
+}
+
+async function fetchLiquidationLevels(ctx: Ctx): Promise<{ items: z.infer<typeof liquidationLevelSchema>[]; status: "ok" | "empty" | "unavailable" }> {
+  try {
+    const search = await ctx.tool.web_search(
+      "current BTC liquidation heatmap largest long and short liquidation clusters exact price level USD CoinGlass",
+      { language_code: "en", timeout_secs: 45 },
+    );
+    const rows = search.content.results.slice(0, 12);
+    if (rows.length === 0) return { items: [], status: "empty" };
+    const extracted = await ctx.inference.complete(
+      `Extract only Bitcoin liquidation clusters explicitly stated in the supplied results and published within the last 14 calendar days. Each row needs the article's exact publication date (publishedDate in YYYY-MM-DD), an exact BTC price in USD, an explicit side (long liquidations below market or short liquidations above market), an explicit USD magnitude, and the stated timeframe. Never use a crawl date, update-check date, or today's date as the publication date. Do not treat support, resistance, open interest, or predicted targets as liquidation levels. Do not infer missing dates or magnitudes. resultIndex is the zero-based source result index. Today is ${new Date().toISOString().slice(0, 10)} UTC.\n\n${JSON.stringify(rows)}`,
+      { schema: liquidationExtractionSchema },
+    );
+    const seen = new Set<string>();
+    const items = extracted.levels.flatMap((item) => {
+      const source = rows[item.resultIndex];
+      const key = `${Math.round(item.priceUsd)}-${item.side}`;
+      const publishedAt = new Date(`${item.publishedDate}T00:00:00Z`).getTime();
+      const ageMs = Date.now() - publishedAt;
+      if (!source?.url || !/^https?:\/\//i.test(source.url) || !Number.isFinite(publishedAt) || ageMs < 0 || ageMs > 14 * 86_400_000 || seen.has(key)) return [];
+      seen.add(key);
+      return [{ priceUsd: item.priceUsd, side: item.side, magnitudeUsd: item.magnitudeUsd, timeframe: item.timeframe, source: source.source?.trim() || "Liquidation heatmap report", url: source.url }];
+    }).sort((a, b) => a.priceUsd - b.priceUsd);
+    return { items, status: items.length > 0 ? "ok" : "empty" };
+  } catch (_error) {
+    return { items: [], status: "unavailable" };
+  }
 }
 
 async function fetchOnChain(): Promise<z.infer<typeof onChainSchema> | null> {
@@ -698,42 +956,192 @@ async function fetchOnChain(): Promise<z.infer<typeof onChainSchema> | null> {
   }
 }
 
-async function fetchResearchCalendar(ctx: Ctx): Promise<{ economicEvents: z.infer<typeof calendarItemSchema>[]; tokenUnlocks: z.infer<typeof unlockItemSchema>[] }> {
-  try {
-    const [economic, unlocks] = await Promise.all([
-      ctx.tool.web_search("upcoming US economic calendar FOMC CPI PCE next 30 days official date", { language_code: "en", timeout_secs: 45 }),
-      ctx.tool.web_search("upcoming crypto token unlock calendar next 30 days", { language_code: "en", timeout_secs: 45 }),
-    ]);
-    const economicRows = economic.content.results.slice(0, 8);
-    const unlockRows = unlocks.content.results.slice(0, 8);
-    const extracted = await ctx.inference.complete(
-      `Extract only upcoming, explicitly dated events from the supplied search results. Today is ${new Date().toISOString().slice(0, 10)} UTC. For economic events include only US macro events likely to affect crypto markets. For token unlocks include only named tokens with an explicit future date and preserve any amount exactly as written. Use YYYY-MM-DD dates only when the result explicitly supports the full date. resultIndex is zero-based within its matching list. Write concise Burmese and English significance notes using only the supplied facts. Omit ambiguous or past items.\n\nECONOMIC RESULTS\n${JSON.stringify(economicRows)}\n\nTOKEN UNLOCK RESULTS\n${JSON.stringify(unlockRows)}`,
-      { schema: researchExtractionSchema },
-    );
-    const today = new Date();
-    const end = new Date(today.getTime() + 35 * 24 * 60 * 60 * 1000);
-    const withinWindow = (value: string) => {
-      const parsed = new Date(`${value}T00:00:00Z`);
-      return Number.isFinite(parsed.getTime()) && parsed >= new Date(`${today.toISOString().slice(0, 10)}T00:00:00Z`) && parsed <= end;
+function decodeCalendarText(value: string) {
+  return cleanNewsText(value)
+    .replace(/&mdash;|&#8212;/gi, "—")
+    .replace(/&ndash;|&#8211;/gi, "–")
+    .replace(/&nbsp;|&#160;/gi, " ")
+    .trim();
+}
+
+function dateOnlyInWindow(date: Date, start: Date, end: Date) {
+  const time = date.getTime();
+  return Number.isFinite(time) && time >= start.getTime() && time <= end.getTime();
+}
+
+function economicImportance(title: string): "high" | "medium" {
+  return /Employment Situation|Consumer Price Index|Producer Price Index|Employment Cost Index/i.test(title) ? "high" : "medium";
+}
+
+function economicNotes(title: string) {
+  if (/Consumer Price Index|Producer Price Index|Real Earnings/i.test(title)) {
+    return {
+      whyItMattersMm: "US inflation ဖိအားနှင့် အတိုးနှုန်းမျှော်မှန်းချက် ပြောင်းလဲနိုင်သော ထုတ်ပြန်ချက်။",
+      whyItMattersEn: "A US inflation release that can shift interest-rate expectations.",
     };
-    const economicEvents = extracted.economicEvents.flatMap((item) => {
-      const source = economicRows[item.resultIndex];
-      if (!source?.url || !/^https?:\/\//i.test(source.url) || !withinWindow(item.date)) return [];
-      return [{ ...item, source: source.source ?? "Economic calendar", url: source.url }];
-    });
-    const tokenUnlocks = extracted.tokenUnlocks.flatMap((item) => {
-      const source = unlockRows[item.resultIndex];
-      if (!source?.url || !/^https?:\/\//i.test(source.url) || !withinWindow(item.date)) return [];
-      return [{ ...item, source: source.source ?? "Token unlock calendar", url: source.url }];
-    });
-    return { economicEvents, tokenUnlocks };
-  } catch (_error) {
-    return { economicEvents: [], tokenUnlocks: [] };
   }
+  if (/Employment|Job Openings|Unemployment/i.test(title)) {
+    return {
+      whyItMattersMm: "US အလုပ်အကိုင်အခြေအနေနှင့် Fed မူဝါဒမျှော်မှန်းချက်အတွက် အရေးပါသော ထုတ်ပြန်ချက်။",
+      whyItMattersEn: "A US labor-market release relevant to Federal Reserve policy expectations.",
+    };
+  }
+  return {
+    whyItMattersMm: "US စီးပွားရေးအခြေအနေနှင့် risk-asset sentiment ကို သက်ရောက်နိုင်သော ထုတ်ပြန်ချက်။",
+    whyItMattersEn: "A US economic release that can affect risk-asset sentiment.",
+  };
+}
+
+async function fetchBlsCalendar(start: Date, end: Date): Promise<z.infer<typeof calendarItemSchema>[]> {
+  const html = await fetchText(BLS_SCHEDULE_URL);
+  const rows = [...html.matchAll(/<tr[^>]*>([\s\S]*?)<\/tr>/gi)];
+  const events: z.infer<typeof calendarItemSchema>[] = [];
+  const allowed = /Employment Situation|Consumer Price Index|Producer Price Index|Job Openings and Labor Turnover Survey|Employment Cost Index/i;
+  for (const row of rows) {
+    const rowHtml = row[1];
+    if (!rowHtml) continue;
+    const cells = [...rowHtml.matchAll(/<td[^>]*>([\s\S]*?)<\/td>/gi)].map((match) => decodeCalendarText(match[1] ?? ""));
+    const dateText = cells[0];
+    const title = cells[2];
+    if (!dateText || !title || !allowed.test(title)) continue;
+    const date = new Date(`${dateText} 12:00:00 UTC`);
+    if (!dateOnlyInWindow(date, start, end)) continue;
+    const normalizedTitle = title.replace(/\s+/g, " ").trim();
+    events.push({
+      title: normalizedTitle,
+      date: date.toISOString().slice(0, 10),
+      importance: economicImportance(normalizedTitle),
+      ...economicNotes(normalizedTitle),
+      source: "U.S. Bureau of Labor Statistics",
+      url: BLS_SCHEDULE_URL,
+    });
+  }
+  return events
+    .filter((item, index, all) => all.findIndex((other) => other.date === item.date && other.title === item.title) === index)
+    .sort((a, b) => a.date.localeCompare(b.date))
+    .slice(0, 6);
+}
+
+async function fetchPublishedTokenUnlocks(start: Date, end: Date): Promise<z.infer<typeof unlockItemSchema>[]> {
+  const html = await fetchText(TOKEN_UNLOCK_SCHEDULE_URL);
+  const headingPattern = /<h3[^>]*>([\s\S]*?)<\/h3>([\s\S]*?)(?=<h[23][^>]*>|$)/gi;
+  const events: z.infer<typeof unlockItemSchema>[] = [];
+  for (const match of html.matchAll(headingPattern)) {
+    const heading = decodeCalendarText(match[1] ?? "");
+    const body = match[2] ?? "";
+    const headingMatch = heading.match(/^(.+?)\s*[—–-]\s*(January|February|March|April|May|June|July|August|September|October|November|December)\s+(\d{1,2})$/i);
+    if (!headingMatch) continue;
+    const [, tokenName, month, day] = headingMatch;
+    if (!tokenName || !month || !day) continue;
+    const date = new Date(`${month} ${day}, 2026 12:00:00 UTC`);
+    if (!dateOnlyInWindow(date, start, end)) continue;
+    const listItems = [...body.matchAll(/<li[^>]*>([\s\S]*?)<\/li>/gi)].map((item) => decodeCalendarText(item[1] ?? ""));
+    const amount = listItems.find((item) => /\d/.test(item) && !/percent|Approx|Category|Notes/i.test(item));
+    if (!amount) continue;
+    events.push({
+      token: tokenName.trim(),
+      date: date.toISOString().slice(0, 10),
+      amount,
+      noteMm: "ထုတ်ဝေထားသော vesting အစီအစဉ်အရ token supply တိုးလာမည့် event ဖြစ်ပြီး ကာလတို liquidity ကို သတိပြုပါ။",
+      noteEn: "A scheduled vesting release that may affect short-term circulating supply and liquidity.",
+      source: "Crypto-Corner unlock calendar",
+      url: TOKEN_UNLOCK_SCHEDULE_URL,
+    });
+  }
+  return events
+    .filter((item, index, all) => all.findIndex((other) => other.date === item.date && other.token === item.token) === index)
+    .sort((a, b) => a.date.localeCompare(b.date))
+    .slice(0, 6);
+}
+
+async function fetchResearchCalendar(ctx: Ctx): Promise<{
+  economicEvents: z.infer<typeof calendarItemSchema>[];
+  tokenUnlocks: z.infer<typeof unlockItemSchema>[];
+  economicStatus: "ok" | "empty" | "unavailable";
+  unlockStatus: "ok" | "empty" | "unavailable";
+}> {
+  const today = new Date();
+  const todayDate = today.toISOString().slice(0, 10);
+  const end = new Date(today.getTime() + 35 * 24 * 60 * 60 * 1000);
+  const endDate = end.toISOString().slice(0, 10);
+  const withinWindow = (value: string) => {
+    const parsed = new Date(`${value}T00:00:00Z`);
+    return Number.isFinite(parsed.getTime())
+      && parsed >= new Date(`${todayDate}T00:00:00Z`)
+      && parsed <= end;
+  };
+
+  const loadEconomicEvents = async (): Promise<{ items: z.infer<typeof calendarItemSchema>[]; status: "ok" | "empty" | "unavailable" }> => {
+    let directSourceFailed = false;
+    try {
+      const officialEvents = await fetchBlsCalendar(new Date(`${todayDate}T00:00:00Z`), end);
+      if (officialEvents.length > 0) return { items: officialEvents, status: "ok" };
+    } catch (_error) {
+      directSourceFailed = true;
+    }
+    try {
+      const search = await ctx.tool.web_search(
+        `United States economic calendar ${todayDate} through ${endDate} FOMC CPI PCE GDP employment release dates`,
+        { language_code: "en", timeout_secs: 45 },
+      );
+      const rows = search.content.results.slice(0, 10);
+      if (rows.length === 0) return { items: [], status: directSourceFailed ? "unavailable" : "empty" };
+      const extracted = await ctx.inference.complete(
+        `Today is ${todayDate} UTC. Extract only upcoming US macroeconomic events explicitly supported by these search results and dated on or before ${endDate}. Prefer FOMC decisions or minutes, CPI, PCE, GDP, and employment releases that can affect crypto markets. Use a full YYYY-MM-DD only when the source explicitly supports the date. resultIndex is the zero-based index in the supplied list. Write concise Burmese and English significance notes without adding unsupported numbers or forecasts. Omit ambiguous and past items.\n\nSEARCH RESULTS\n${JSON.stringify(rows)}`,
+        { schema: economicExtractionSchema },
+      );
+      const items = extracted.events.flatMap((item) => {
+        const source = rows[item.resultIndex];
+        if (!source?.url || !/^https?:\/\//i.test(source.url) || !withinWindow(item.date)) return [];
+        return [{ ...item, source: source.source?.trim() || "Economic calendar", url: source.url }];
+      });
+      return { items, status: items.length > 0 ? "ok" : "empty" };
+    } catch (_error) {
+      return { items: [], status: "unavailable" };
+    }
+  };
+
+  const loadTokenUnlocks = async (): Promise<{ items: z.infer<typeof unlockItemSchema>[]; status: "ok" | "empty" | "unavailable" }> => {
+    let directSourceFailed = false;
+    try {
+      const publishedUnlocks = await fetchPublishedTokenUnlocks(new Date(`${todayDate}T00:00:00Z`), end);
+      if (publishedUnlocks.length > 0) return { items: publishedUnlocks, status: "ok" };
+    } catch (_error) {
+      directSourceFailed = true;
+    }
+    try {
+      const search = await ctx.tool.web_search(
+        `crypto token unlock calendar ${todayDate} through ${endDate} exact date amount OP TIA SUI upcoming`,
+        { language_code: "en", timeout_secs: 45 },
+      );
+      const rows = search.content.results.slice(0, 10);
+      if (rows.length === 0) return { items: [], status: directSourceFailed ? "unavailable" : "empty" };
+      const extracted = await ctx.inference.complete(
+        `Today is ${todayDate} UTC. Extract only upcoming token unlocks explicitly supported by these search results and dated on or before ${endDate}. Require a named token, a full YYYY-MM-DD date, and an explicit amount or percentage; copy that amount or percentage exactly as written. resultIndex is the zero-based index in the supplied list. Write concise Burmese and English notes without inventing valuation or market impact. Omit ambiguous and past items.\n\nSEARCH RESULTS\n${JSON.stringify(rows)}`,
+        { schema: unlockExtractionSchema },
+      );
+      const items = extracted.events.flatMap((item) => {
+        const source = rows[item.resultIndex];
+        if (!source?.url || !/^https?:\/\//i.test(source.url) || !withinWindow(item.date) || item.amount.trim().length === 0) return [];
+        return [{ ...item, source: source.source?.trim() || "Token unlock calendar", url: source.url }];
+      });
+      return { items, status: items.length > 0 ? "ok" : "empty" };
+    } catch (_error) {
+      return { items: [], status: "unavailable" };
+    }
+  };
+
+  const [economicResult, unlockResult] = await Promise.all([loadEconomicEvents(), loadTokenUnlocks()]);
+  return {
+    economicEvents: economicResult.items,
+    tokenUnlocks: unlockResult.items,
+    economicStatus: economicResult.status,
+    unlockStatus: unlockResult.status,
+  };
 }
 
 async function fetchLiveDashboard(ctx: Ctx): Promise<Dashboard> {
-  const [statsPayloads, candlesPayload, fearGreedPayload, timePayload, whales, newsResult, whaleCoverageResult, derivatives, onChain, researchCalendar] = await Promise.all([
+  const [statsPayloads, candlesPayload, fearGreedPayload, timePayload, whales, newsResult, whaleCoverageResult, derivatives, etfFlowResult, liquidationResult, onChain, researchCalendar] = await Promise.all([
     Promise.all(
       PRODUCTS.map(async (product) => {
         try {
@@ -751,6 +1159,8 @@ async function fetchLiveDashboard(ctx: Ctx): Promise<Dashboard> {
     fetchNews(ctx),
     fetchWhaleCoverage(ctx),
     fetchDerivatives(),
+    fetchEtfFlows(ctx),
+    fetchLiquidationLevels(ctx),
     fetchOnChain(),
     fetchResearchCalendar(ctx),
   ]);
@@ -854,12 +1264,223 @@ async function fetchLiveDashboard(ctx: Ctx): Promise<Dashboard> {
     whaleCoverage: whaleCoverageResult.items,
     whaleThresholdBtc: WHALE_THRESHOLD_BTC,
     derivatives,
+    etfFlows: etfFlowResult.items,
+    liquidationLevels: liquidationResult.items,
     onChain,
     economicCalendar: researchCalendar.economicEvents,
     tokenUnlocks: researchCalendar.tokenUnlocks,
+    marketIntelligenceStatus: {
+      derivatives: derivatives.length > 0 ? "ok" : "unavailable",
+      etfFlows: etfFlowResult.status,
+      liquidations: liquidationResult.status,
+      economicCalendar: researchCalendar.economicStatus,
+      tokenUnlocks: researchCalendar.unlockStatus,
+      refreshedAt: new Date().toISOString(),
+    },
     configuredNewsSources: [...CONFIGURED_NEWS_SOURCES],
-    sources: ["Coinbase Exchange", "Alternative.me Fear & Greed Index", "Blockchain.com", ...(derivatives.length > 0 ? ["Binance Futures"] : []), ...(onChain ? ["Coin Metrics Community"] : []), ...new Set([...newsResult.providers, ...whaleCoverageResult.providers, ...researchCalendar.economicEvents.map((item) => item.source), ...researchCalendar.tokenUnlocks.map((item) => item.source)])],
+    sources: ["Coinbase Exchange", "Alternative.me Fear & Greed Index", "Blockchain.com", ...new Set([...derivatives.map((item) => item.source), ...etfFlowResult.items.map((item) => item.source), ...liquidationResult.items.map((item) => item.source), ...(onChain ? ["Coin Metrics Community"] : []), ...newsResult.providers, ...whaleCoverageResult.providers, ...researchCalendar.economicEvents.map((item) => item.source), ...researchCalendar.tokenUnlocks.map((item) => item.source)])],
   });
+}
+
+function average(values: number[]) {
+  return values.length === 0 ? 0 : values.reduce((sum, value) => sum + value, 0) / values.length;
+}
+
+function emaSeries(values: number[], period: number) {
+  if (values.length === 0) return [];
+  const multiplier = 2 / (period + 1);
+  const first = values[0] ?? 0;
+  const result = [first];
+  for (let index = 1; index < values.length; index += 1) {
+    const value = values[index] ?? result[index - 1] ?? first;
+    const previous = result[index - 1] ?? first;
+    result.push((value - previous) * multiplier + previous);
+  }
+  return result;
+}
+
+function calculateRsi(closes: number[], period = 14) {
+  const window = closes.slice(-(period + 1));
+  if (window.length < period + 1) throw new Error("Not enough candles for RSI");
+  let gains = 0;
+  let losses = 0;
+  for (let index = 1; index < window.length; index += 1) {
+    const current = window[index];
+    const previous = window[index - 1];
+    if (current === undefined || previous === undefined) continue;
+    const change = current - previous;
+    if (change >= 0) gains += change;
+    else losses += Math.abs(change);
+  }
+  const averageGain = gains / period;
+  const averageLoss = losses / period;
+  if (averageLoss === 0) return 100;
+  return 100 - 100 / (1 + averageGain / averageLoss);
+}
+
+function calculateTimeframeIndicators(candles: z.infer<typeof candleSchema>[], label: "1H" | "4H" | "1D") {
+  const ordered = [...candles].sort((a, b) => a[0] - b[0]);
+  const closes = ordered.map((candle) => candle[4]);
+  if (closes.length < 50) throw new Error(`Not enough ${label} candles for indicators`);
+  const rsi = calculateRsi(closes);
+  const ema12 = emaSeries(closes, 12);
+  const ema26 = emaSeries(closes, 26);
+  const macdSeries = closes.map((_value, index) => (ema12[index] ?? 0) - (ema26[index] ?? 0));
+  const signalSeries = emaSeries(macdSeries, 9);
+  const macd = macdSeries.at(-1) ?? 0;
+  const signalLine = signalSeries.at(-1) ?? 0;
+  const histogram = macd - signalLine;
+  const fast = average(closes.slice(-20));
+  const slow = average(closes.slice(-50));
+  const rsiSignal: z.infer<typeof tradingSignalValueSchema> = rsi < 30 ? "buy" : rsi > 70 ? "sell" : "neutral";
+  const macdSignal: z.infer<typeof tradingSignalValueSchema> = histogram > 0 ? "buy" : histogram < 0 ? "sell" : "neutral";
+  const maSignal: z.infer<typeof tradingSignalValueSchema> = fast > slow ? "buy" : fast < slow ? "sell" : "neutral";
+  const technicalScore = Math.round(average([rsiSignal, macdSignal, maSignal].map((signal) => signal === "buy" ? 100 : signal === "sell" ? 0 : 50)));
+  const verdict: z.infer<typeof tradingSignalValueSchema> = technicalScore >= 67 ? "buy" : technicalScore <= 33 ? "sell" : "neutral";
+  const latest = ordered.at(-1);
+  return {
+    label,
+    technicalScore,
+    verdict,
+    candleAsOf: new Date((latest?.[0] ?? 0) * 1000).toISOString(),
+    indicators: {
+      rsi: { value: Number(rsi.toFixed(2)), signal: rsiSignal },
+      macd: { macd: Number(macd.toFixed(4)), signalLine: Number(signalLine.toFixed(4)), histogram: Number(histogram.toFixed(4)), signal: macdSignal },
+      movingAverage: { fast: Number(fast.toFixed(4)), slow: Number(slow.toFixed(4)), signal: maSignal },
+    },
+  };
+}
+
+function aggregateFourHourCandles(candles: z.infer<typeof candleSchema>[]) {
+  const buckets = new Map<number, z.infer<typeof candleSchema>[]>();
+  for (const candle of candles) {
+    const bucket = Math.floor(candle[0] / 14_400) * 14_400;
+    const rows = buckets.get(bucket) ?? [];
+    rows.push(candle);
+    buckets.set(bucket, rows);
+  }
+  return [...buckets.entries()].map(([timestamp, rows]) => {
+    const ordered = [...rows].sort((a, b) => a[0] - b[0]);
+    const first = ordered[0];
+    const last = ordered.at(-1);
+    if (!first || !last) return null;
+    const low = Math.min(...ordered.map((row) => row[1]));
+    const high = Math.max(...ordered.map((row) => row[2]));
+    const volume = ordered.reduce((sum, row) => sum + row[5], 0);
+    return [timestamp, low, high, first[3], last[4], volume] as z.infer<typeof candleSchema>;
+  }).filter((row): row is z.infer<typeof candleSchema> => row !== null);
+}
+
+function onChainSignal(dashboard: Dashboard, symbol: string) {
+  if (symbol !== "BTC" || !dashboard.onChain) {
+    return {
+      available: false,
+      score: null,
+      detailMm: symbol === "BTC" ? "ယခု snapshot အတွက် on-chain data မရရှိပါ။" : `${symbol} အတွက် ဒီ dashboard ၏ verified on-chain feed မရှိသေးပါ။`,
+      detailEn: symbol === "BTC" ? "On-chain data is unavailable for this snapshot." : `This dashboard does not yet have a verified ${symbol} on-chain feed.`,
+    };
+  }
+  const readings: number[] = [];
+  if (dashboard.onChain.mvrv !== null) {
+    readings.push(dashboard.onChain.mvrv < 1 ? 70 : dashboard.onChain.mvrv > 3.5 ? 30 : 50);
+  }
+  if (dashboard.onChain.exchangeNetflowBtc !== null) {
+    readings.push(dashboard.onChain.exchangeNetflowBtc < 0 ? 65 : dashboard.onChain.exchangeNetflowBtc > 0 ? 35 : 50);
+  }
+  const score = readings.length > 0 ? Math.round(average(readings)) : null;
+  const netflow = dashboard.onChain.exchangeNetflowBtc;
+  const netflowText = netflow === null ? "exchange net flow unavailable" : `${netflow > 0 ? "+" : ""}${netflow.toFixed(2)} BTC exchange net flow`;
+  return {
+    available: score !== null,
+    score,
+    detailMm: `MVRV ${dashboard.onChain.mvrv?.toFixed(2) ?? "—"} နှင့် ${netflowText} ကို ထည့်တွက်ထားသည်။`,
+    detailEn: `Uses MVRV ${dashboard.onChain.mvrv?.toFixed(2) ?? "—"} and ${netflowText}.`,
+  };
+}
+
+async function latestTradingSignal(ctx: Ctx, symbol: string): Promise<TradingSignal | null> {
+  const db = ctx.db<typeof schema>();
+  const rows = await db.select().from(schema.tradingSignalSnapshots).where(eq(schema.tradingSignalSnapshots.symbol, symbol)).orderBy(desc(schema.tradingSignalSnapshots.generatedAt)).limit(1);
+  const row = rows[0];
+  if (!row) return null;
+  const parsed = tradingSignalSchema.safeParse(JSON.parse(row.payload));
+  return parsed.success ? parsed.data : null;
+}
+
+async function createTradingSignal(ctx: Ctx, symbol: "BTC" | "ETH" | "SOL"): Promise<TradingSignalResult> {
+  const db = ctx.db<typeof schema>();
+  try {
+    const dashboard = await latestSnapshot(ctx) ?? await fetchLiveDashboard(ctx);
+    const product = PRODUCTS.find((item) => item.symbol === symbol);
+    const quote = dashboard.quotes.find((item) => item.symbol === symbol);
+    if (!product || !quote) throw new Error("Selected quote is unavailable");
+    const [dailyPayload, hourlyPayload] = await Promise.all([
+      fetchJson(`https://api.exchange.coinbase.com/products/${product.id}/candles?granularity=86400`),
+      fetchJson(`https://api.exchange.coinbase.com/products/${product.id}/candles?granularity=3600`),
+    ]);
+    const dailyCandles = z.array(candleSchema).parse(dailyPayload);
+    const hourlyCandles = z.array(candleSchema).parse(hourlyPayload);
+    const oneHour = calculateTimeframeIndicators(hourlyCandles, "1H");
+    const fourHour = calculateTimeframeIndicators(aggregateFourHourCandles(hourlyCandles), "4H");
+    const oneDay = calculateTimeframeIndicators(dailyCandles, "1D");
+    const technicalScore = Math.round(average([oneHour.technicalScore, fourHour.technicalScore, oneDay.technicalScore]));
+    const chain = onChainSignal(dashboard, symbol);
+    const evidence = {
+      asset: { symbol, name: product.name, price: quote.price, changePct24h: quote.changePct, marketAsOf: dashboard.sourceTime },
+      timeframes: { oneHour, fourHour, oneDay, blendedScore: technicalScore },
+      newsSentiment: { score: dashboard.newsScore, stories: dashboard.newsSentiment.total, counts: dashboard.newsSentiment },
+      onChain: chain,
+    };
+    const ai = await ctx.inference.complete(
+      `Assess a short-to-medium-term crypto trading signal using only the supplied evidence. Balance the 1-hour, 4-hour, and 1-day technical indicators, 24-hour price change, broad crypto news sentiment, and verified on-chain data when available. Treat timeframe disagreement as uncertainty and lower confidence. If on-chain data is unavailable, explicitly lower confidence rather than inventing it. Choose one verdict, a 0–100 directional score where 50 is neutral, and a conservative confidence score. Explain the main supporting and conflicting factors in concise natural Burmese and English. Include a separate caution that signals can fail and is not personalized financial advice. Do not predict a target price or guaranteed outcome.
+
+${JSON.stringify(evidence)}`,
+      { schema: aiTradingSignalContentSchema },
+    );
+    const report = tradingSignalSchema.parse({
+      symbol,
+      name: product.name,
+      generatedAt: new Date().toISOString(),
+      marketAsOf: dashboard.sourceTime,
+      price: quote.price,
+      changePct: quote.changePct,
+      verdict: ai.verdict,
+      confidence: ai.confidence,
+      technicalScore,
+      aiScore: ai.score,
+      timeframes: { oneHour, fourHour, oneDay },
+      indicators: oneDay.indicators,
+      news: { score: dashboard.newsScore, total: dashboard.newsSentiment.total },
+      onChain: chain,
+      rationale: ai.rationale,
+      caution: ai.caution,
+      sources: ["Coinbase Exchange", ...(dashboard.newsSentiment.total > 0 ? ["Crypto news sources"] : []), ...(chain.available && dashboard.onChain ? [dashboard.onChain.source] : [])],
+    });
+    const previous = await latestTradingSignal(ctx, symbol);
+    await db.insert(schema.tradingSignalSnapshots).values({ symbol, generatedAt: new Date(report.generatedAt), marketAsOf: new Date(report.marketAsOf), payload: JSON.stringify(report) });
+    if (previous && previous.verdict !== report.verdict) {
+      const prefRows = await db.select().from(schema.notificationPreferences).where(eq(schema.notificationPreferences.id, 1)).limit(1);
+      if (prefRows[0]?.signalAlerts) {
+        await db.insert(schema.tradingSignalEvents).values({
+          symbol,
+          previousVerdict: previous.verdict,
+          newVerdict: report.verdict,
+          confidence: report.confidence,
+          triggeredAt: new Date(report.generatedAt),
+          dismissed: false,
+        });
+      }
+    }
+    const rows = await db.select({ id: schema.tradingSignalSnapshots.id }).from(schema.tradingSignalSnapshots).where(eq(schema.tradingSignalSnapshots.symbol, symbol)).orderBy(desc(schema.tradingSignalSnapshots.generatedAt)).limit(60);
+    const staleIds = rows.slice(24).map((row) => row.id);
+    if (staleIds.length > 0) await db.delete(schema.tradingSignalSnapshots).where(inArray(schema.tradingSignalSnapshots.id, staleIds));
+    ctx.invalidateQueries();
+    return { status: "ok", data: report, message: null, messageEn: null };
+  } catch (_error) {
+    const cached = await latestTradingSignal(ctx, symbol);
+    if (cached) return { status: "stale", data: cached, message: "Signal အသစ် မရသေးသဖြင့် နောက်ဆုံးသိမ်းထားသော signal ကို ပြထားသည်။", messageEn: "A fresh signal is unavailable, so the latest saved signal is shown." };
+    return { status: "error", data: null, message: "Trading signal ကို ယခုအချိန် မဖန်တီးနိုင်သေးပါ။", messageEn: "The trading signal cannot be generated right now." };
+  }
 }
 
 function buildReferenceLevels(dashboard: Dashboard) {
@@ -1138,13 +1759,80 @@ async function refresh(ctx: Ctx): Promise<DashboardResult> {
   }
 }
 
+async function refreshMarketIntelligence(ctx: Ctx): Promise<DashboardResult> {
+  const cached = await latestSnapshot(ctx);
+  if (!cached) return refresh(ctx);
+
+  const [derivativeRows, etfFlowResult, liquidationResult, calendar] = await Promise.all([
+    fetchDerivatives(),
+    fetchEtfFlows(ctx),
+    fetchLiquidationLevels(ctx),
+    fetchResearchCalendar(ctx),
+  ]);
+  const derivatives = derivativeRows.length > 0 ? derivativeRows : cached.derivatives;
+  const etfFlows = etfFlowResult.status === "unavailable" ? cached.etfFlows : etfFlowResult.items;
+  const liquidationLevels = liquidationResult.status === "unavailable" ? cached.liquidationLevels : liquidationResult.items;
+  const economicCalendar = calendar.economicStatus === "unavailable" ? cached.economicCalendar : calendar.economicEvents;
+  const tokenUnlocks = calendar.unlockStatus === "unavailable" ? cached.tokenUnlocks : calendar.tokenUnlocks;
+  const refreshedAt = new Date().toISOString();
+  const dashboard = dashboardSchema.parse({
+    ...cached,
+    fetchedAt: refreshedAt,
+    derivatives,
+    etfFlows,
+    liquidationLevels,
+    economicCalendar,
+    tokenUnlocks,
+    marketIntelligenceStatus: {
+      derivatives: derivativeRows.length > 0 ? "ok" : "unavailable",
+      etfFlows: etfFlowResult.status,
+      liquidations: liquidationResult.status,
+      economicCalendar: calendar.economicStatus,
+      tokenUnlocks: calendar.unlockStatus,
+      refreshedAt,
+    },
+    sources: [...new Set([
+      ...cached.sources,
+      ...derivatives.map((item) => item.source),
+      ...etfFlows.map((item) => item.source),
+      ...liquidationLevels.map((item) => item.source),
+      ...economicCalendar.map((item) => item.source),
+      ...tokenUnlocks.map((item) => item.source),
+    ])],
+  });
+
+  const db = ctx.db<typeof schema>();
+  await db.insert(schema.marketSnapshots).values({
+    fetchedAt: new Date(dashboard.fetchedAt),
+    score: dashboard.score,
+    sentiment: dashboard.sentiment,
+    payload: JSON.stringify(dashboard),
+  });
+  ctx.invalidateQueries();
+
+  const allUnavailable = derivativeRows.length === 0
+    && etfFlowResult.status === "unavailable"
+    && liquidationResult.status === "unavailable"
+    && calendar.economicStatus === "unavailable"
+    && calendar.unlockStatus === "unavailable";
+  return allUnavailable
+    ? {
+      status: "stale",
+      data: dashboard,
+      message: "Markets data source များကို ယခုချိတ်ဆက်မရသေးပါ။ သိမ်းထားသော data ရှိပါက ဆက်လက်ပြထားသည်။",
+      messageEn: "Markets sources are temporarily unavailable. Saved data is shown where available.",
+    }
+    : { status: "ok", data: dashboard, message: null, messageEn: null };
+}
+
 async function getSettings(ctx: Ctx): Promise<Settings> {
   const db = ctx.db<typeof schema>();
-  const [watchlistRows, alertRows, preferenceRows, eventRows, holdingRows, notificationRows] = await Promise.all([
+  const [watchlistRows, alertRows, preferenceRows, eventRows, signalEventRows, holdingRows, notificationRows] = await Promise.all([
     db.select().from(schema.watchlistItems).orderBy(desc(schema.watchlistItems.createdAt)),
     db.select().from(schema.priceAlerts).orderBy(desc(schema.priceAlerts.createdAt)),
     db.select().from(schema.marketAlertPreferences).where(eq(schema.marketAlertPreferences.id, 1)).limit(1),
     db.select().from(schema.marketAlertEvents).where(eq(schema.marketAlertEvents.dismissed, false)).orderBy(desc(schema.marketAlertEvents.triggeredAt)).limit(10),
+    db.select().from(schema.tradingSignalEvents).where(eq(schema.tradingSignalEvents.dismissed, false)).orderBy(desc(schema.tradingSignalEvents.triggeredAt)).limit(20),
     db.select().from(schema.portfolioHoldings).orderBy(desc(schema.portfolioHoldings.updatedAt)),
     db.select().from(schema.notificationPreferences).where(eq(schema.notificationPreferences.id, 1)).limit(1),
   ]);
@@ -1174,6 +1862,14 @@ async function getSettings(ctx: Ctx): Promise<Settings> {
       fearGreed: row.fearGreed,
       triggeredAt: row.triggeredAt.toISOString(),
     })),
+    signalEvents: signalEventRows.map((row) => ({
+      id: row.id,
+      symbol: row.symbol,
+      previousVerdict: row.previousVerdict,
+      newVerdict: row.newVerdict,
+      confidence: row.confidence,
+      triggeredAt: row.triggeredAt.toISOString(),
+    })),
     holdings: holdingRows.map((row) => ({
       id: row.id,
       symbol: row.symbol,
@@ -1182,6 +1878,7 @@ async function getSettings(ctx: Ctx): Promise<Settings> {
       quantity: row.quantity,
       averageCost: row.averageCost,
       manualPrice: row.manualPrice,
+      acquiredOn: row.acquiredOn,
       createdAt: row.createdAt.toISOString(),
       updatedAt: row.updatedAt.toISOString(),
     })),
@@ -1189,6 +1886,7 @@ async function getSettings(ctx: Ctx): Promise<Settings> {
       priceAlerts: notification?.priceAlerts ?? false,
       marketAlerts: notification?.marketAlerts ?? false,
       weeklyDigest: notification?.weeklyDigest ?? false,
+      signalAlerts: notification?.signalAlerts ?? false,
     },
   };
 }
@@ -1198,14 +1896,12 @@ export const Actions = {
     request: z.object({}),
     response: resultSchema,
     async handler(ctx): Promise<DashboardResult> {
+      // Opening the dashboard must not wait on the slowest upstream feed or
+      // optional inference pass. Scheduled and manual refreshes keep this
+      // snapshot current; only a brand-new dashboard without cached data needs
+      // to perform the full live refresh in the request path.
       const cached = await latestSnapshot(ctx);
-      if (cached) {
-        const ageMs = Date.now() - new Date(cached.fetchedAt).getTime();
-        const supplementalFeedsPresent = cached.news.length > 0 && cached.whales.length > 0;
-        if (ageMs < (supplementalFeedsPresent ? 5 * 60 * 1000 : 60 * 1000)) {
-          return { status: "ok", data: cached, message: null, messageEn: null };
-        }
-      }
+      if (cached) return { status: "ok", data: cached, message: null, messageEn: null };
       return refresh(ctx);
     },
   }),
@@ -1215,6 +1911,14 @@ export const Actions = {
     response: resultSchema,
     async handler(ctx): Promise<DashboardResult> {
       return refresh(ctx);
+    },
+  }),
+
+  refreshMarketIntelligence: defineAction({
+    request: z.object({}),
+    response: resultSchema,
+    async handler(ctx): Promise<DashboardResult> {
+      return refreshMarketIntelligence(ctx);
     },
   }),
 
@@ -1339,6 +2043,7 @@ export const Actions = {
       quantity: z.number().positive().max(1_000_000_000),
       averageCost: z.number().positive().max(100_000_000).nullable(),
       manualPrice: z.number().positive().max(100_000_000).nullable().optional(),
+      acquiredOn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
     }),
     response: settingsSchema,
     async handler(ctx, args): Promise<Settings> {
@@ -1356,6 +2061,7 @@ export const Actions = {
         quantity: args.quantity,
         averageCost: args.averageCost,
         manualPrice: product ? null : args.manualPrice ?? null,
+        acquiredOn: args.acquiredOn ?? null,
         updatedAt: now,
       };
       if (rows[0]) {
@@ -1379,8 +2085,19 @@ export const Actions = {
     },
   }),
 
+  dismissTradingSignalEvent: defineAction({
+    request: z.object({ id: z.number().int().positive() }),
+    response: settingsSchema,
+    async handler(ctx, args): Promise<Settings> {
+      const db = ctx.db<typeof schema>();
+      await db.update(schema.tradingSignalEvents).set({ dismissed: true }).where(eq(schema.tradingSignalEvents.id, args.id));
+      ctx.invalidateQueries();
+      return getSettings(ctx);
+    },
+  }),
+
   setNotificationPreferences: defineAction({
-    request: z.object({ priceAlerts: z.boolean(), marketAlerts: z.boolean(), weeklyDigest: z.boolean() }),
+    request: z.object({ priceAlerts: z.boolean(), marketAlerts: z.boolean(), weeklyDigest: z.boolean(), signalAlerts: z.boolean() }),
     response: settingsSchema,
     async handler(ctx, args): Promise<Settings> {
       const db = ctx.db<typeof schema>();
@@ -1410,6 +2127,26 @@ export const Actions = {
     response: weeklyDigestResultSchema,
     async handler(ctx): Promise<WeeklyDigestResult> {
       return createWeeklyMarketDigest(ctx);
+    },
+  }),
+
+  getTradingSignal: defineAction({
+    request: z.object({ symbol: z.enum(["BTC", "ETH", "SOL"]) }),
+    response: tradingSignalResultSchema,
+    async handler(ctx, args): Promise<TradingSignalResult> {
+      const cached = await latestTradingSignal(ctx, args.symbol);
+      if (cached && Date.now() - new Date(cached.generatedAt).getTime() < 15 * 60 * 1000) {
+        return { status: "ok", data: cached, message: null, messageEn: null };
+      }
+      return createTradingSignal(ctx, args.symbol);
+    },
+  }),
+
+  refreshTradingSignal: defineAction({
+    request: z.object({ symbol: z.enum(["BTC", "ETH", "SOL"]) }),
+    response: tradingSignalResultSchema,
+    async handler(ctx, args): Promise<TradingSignalResult> {
+      return createTradingSignal(ctx, args.symbol);
     },
   }),
 } satisfies ActionsModule;

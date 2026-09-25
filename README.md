@@ -14,7 +14,49 @@ The current runtime uses:
 - `ctx.inference.complete` for bilingual summaries, sentiment, daily updates, and weekly digests
 - managed schedules for hourly market refresh, the daily Market Update, and the Monday digest
 
-Because `@hatch/space-sdk` is a Muse runtime dependency, the current tree is not a one-click standalone deployment. Follow [`docs/STANDALONE-MIGRATION.md`](docs/STANDALONE-MIGRATION.md) to move it to a conventional web stack. A Postgres starting schema is included at [`deploy/postgres/schema.sql`](deploy/postgres/schema.sql), and future cron routes are documented in [`deploy/cron/README.md`](deploy/cron/README.md).
+Because `@hatch/space-sdk` is a Muse runtime dependency, the hosted artifact cannot run elsewhere as-is. The `standalone/` runtime in this repo solves that: a Bun + SQLite server that reuses `server/src/actions.ts` verbatim (only its SDK import is rewritten at build time), serves the React client from `client/dist/`, and runs the hourly/daily/weekly schedules in-process. See [Run on a VPS](#run-on-a-vps-one-command) below for the one-command deployment.
+
+## Run on a VPS (one command)
+
+Requirements: an Ubuntu/Debian VPS with outbound internet (1 vCPU / 1 GB RAM is enough). The installer sets up Docker if it is missing.
+
+```bash
+curl -sSL https://raw.githubusercontent.com/sankahchan/crypto-index-dashboard/main/deploy/vps-install.sh | bash
+```
+
+Then open `http://<your-vps-ip>:3000`. The script is idempotent: re-running it pulls the latest code and redeploys without touching your `.env` or the database volume.
+
+Manual alternative (after cloning):
+
+```bash
+cp .env.example .env   # first time only; add API keys as wanted
+docker compose up -d --build
+```
+
+How it works: the multi-stage `Dockerfile` installs dependencies with Bun, rewrites `server/src/actions.ts` to use the local SDK shim (`standalone/server/space-sdk-shim.ts`), typechecks the standalone server, builds the React client into `client/dist/`, and ships a minimal `oven/bun` runtime image. Data lives in SQLite at `DATA_DIR` (default `/app/data`), persisted in the `app-data` Docker volume. Migrations in `drizzle/` run automatically on boot.
+
+Built-in schedules (no external cron needed):
+
+| Job | Cadence |
+| --- | --- |
+| Market data + intelligence refresh | hourly (first run ~15 s after boot) |
+| Daily Market Update (Myanmar/English) | daily ~08:22 in `APP_TIMEZONE` |
+| Weekly digest (Myanmar/English) | Monday ~08:22 in `APP_TIMEZONE` |
+
+`POST /api/refresh/{market,daily,weekly}` with an `x-cron-secret` header (matching `CRON_SECRET`) lets an external cron trigger the same jobs; the endpoint is disabled when `CRON_SECRET` is empty. `GET /api/health` reports version, uptime, and whether AI/search are configured.
+
+### Which features need API keys?
+
+No keys are required for prices, charts, the Market Pulse index, cycle position, portfolio math, alerts, watchlists, DCA tools, funding/open interest, liquidation levels, token unlocks, or on-chain data — those use deterministic code and public sources.
+
+Optional keys unlock the rest:
+
+| Key(s) | Enables |
+| --- | --- |
+| `GEMINI_API_KEY` / `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` / `DEEPSEEK_API_KEY` (any one; priority via `AI_PROVIDERS`) | AI market briefs, news-sentiment classification, trading-signal AI assessments, daily/weekly AI briefings |
+| `SEARCH_PROVIDER=tavily` + `SEARCH_API_KEY` (or `brave`) | news pipeline feeding sentiment and market intelligence |
+
+Without keys, AI/search-dependent sections degrade honestly (empty or "not configured" states) instead of failing.
 
 ## Current artifact development
 
