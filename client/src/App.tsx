@@ -377,13 +377,70 @@ const cycleStages = [
   { en: "Depression", my: "စိတ်ပျက်မှု", quoteEn: "Nothing is worth the risk.", quoteMy: "ဘာမှ risk ယူဖို့ မတန်တော့ဘူး။", noteEn: "Expectations remain deeply subdued and participation dries up. This low-attention phase can precede the next recovery, but timing remains uncertain.", noteMy: "မျှော်လင့်ချက် အလွန်နိမ့်ပြီး ပါဝင်သူလည်း နည်းသွားပါတယ်။ ဒီလိုအာရုံစိုက်မှုနည်းတဲ့အဆင့်က နောက် recovery မတိုင်ခင် ဖြစ်နိုင်ပေမဲ့ အချိန်ကိုတော့ အတည်မပြုနိုင်ပါ။", color: "#8d7099", level: 14 },
 ] as const;
 
+type CycleRegime = "recovering" | "declining" | "mixed";
+
+function deriveCycleReading(data: Dashboard) {
+  const latestHistory = data.history.at(-1);
+  const previousHistory = data.history.at(-2);
+  const currentScore = data.score;
+  const oneDayDelta = latestHistory && previousHistory
+    ? latestHistory.score - previousHistory.score
+    : 0;
+  const lookbackIntervals = Math.min(7, Math.max(0, data.history.length - 1));
+  const referenceIndex = data.history.length - 1 - lookbackIntervals;
+  const reference = referenceIndex >= 0 ? data.history[referenceIndex] : undefined;
+  const latestScore = latestHistory?.score ?? currentScore;
+  const sevenDayDelta = reference ? latestScore - reference.score : oneDayDelta;
+
+  // A one-point daily move is normal noise, not proof that the market crossed from
+  // the rising half of the psychology curve to the falling half. Require a
+  // meaningful multi-day move before switching branches.
+  const regime: CycleRegime = sevenDayDelta >= 4
+    ? "recovering"
+    : sevenDayDelta <= -4
+      ? "declining"
+      : "mixed";
+  const risingStage = Math.min(5, Math.max(0, Math.floor(currentScore / 17)));
+  const decliningStage = Math.min(12, 6 + Math.max(0, Math.floor((100 - currentScore) / 15)));
+  const stageIndex = regime === "declining"
+    ? decliningStage
+    : regime === "recovering"
+      ? risingStage
+      : currentScore >= 56
+        ? risingStage
+        : currentScore <= 44
+          ? decliningStage
+          : sevenDayDelta >= 0
+            ? risingStage
+            : decliningStage;
+  const confidence: "low" | "medium" = regime === "mixed" || Math.abs(sevenDayDelta) < 8 ? "low" : "medium";
+
+  return { stageIndex, regime, confidence, oneDayDelta, sevenDayDelta, lookbackIntervals };
+}
+
+function signedPoints(value: number) {
+  return `${value > 0 ? "+" : ""}${value}`;
+}
+
+type CyclePointDotProps = {
+  cx?: number;
+  cy?: number;
+  payload?: { color?: string };
+};
+
+function CyclePointDot({ cx, cy, payload }: CyclePointDotProps) {
+  if (typeof cx !== "number" || typeof cy !== "number") return <g />;
+  return <circle cx={cx} cy={cy} r={4.2} fill="var(--surface-strong)" stroke={payload?.color ?? "var(--accent)"} strokeWidth={2.4} />;
+}
+
+function CycleActiveDot({ cx, cy, payload }: CyclePointDotProps) {
+  if (typeof cx !== "number" || typeof cy !== "number") return <g />;
+  return <circle cx={cx} cy={cy} r={7} fill="var(--surface-strong)" stroke={payload?.color ?? "var(--text)"} strokeWidth={3} />;
+}
+
 function MarketCycle({ data, lang }: { data: Dashboard; lang: Language }) {
-  const latest = data.history.at(-1);
-  const previous = data.history.at(-2);
-  const rising = !latest || !previous ? data.btcChangePct >= 0 : latest.score >= previous.score;
-  const stageIndex = rising
-    ? Math.min(5, Math.max(0, Math.floor(data.score / 17)))
-    : Math.min(12, 6 + Math.max(0, Math.floor((100 - data.score) / 15)));
+  const reading = deriveCycleReading(data);
+  const { stageIndex } = reading;
   const [selectedIndex, setSelectedIndex] = useState(stageIndex);
   useEffect(() => setSelectedIndex(stageIndex), [stageIndex]);
   const current = cycleStages[stageIndex] ?? cycleStages[0];
@@ -391,9 +448,16 @@ function MarketCycle({ data, lang }: { data: Dashboard; lang: Language }) {
   const chartStages = cycleStages.map((stage, index) => ({ ...stage, position: index, label: lang === "my" ? stage.my : stage.en }));
   const closingStage = cycleStages[0];
   const cycleChartData = [...chartStages, { ...closingStage, position: 13, level: 31, label: lang === "my" ? "ပြန်လည် မယုံကြည်သေး" : "Disbelief returns" }];
-  const directionLabel = rising ? (lang === "my" ? "ပြန်လည်မြင့်တက်" : "Recovering") : (lang === "my" ? "ကျဆင်းဘက်" : "Declining");
+  const directionLabel = reading.regime === "recovering"
+    ? (lang === "my" ? "ပြန်လည်မြင့်တက်" : "Recovering")
+    : reading.regime === "declining"
+      ? (lang === "my" ? "ကျဆင်းဘက်" : "Declining")
+      : (lang === "my" ? "မသေချာ / ဘေးတိုက်" : "Mixed / sideways");
+  const confidenceLabel = reading.confidence === "medium"
+    ? (lang === "my" ? "အလယ်အလတ်" : "Medium")
+    : (lang === "my" ? "နိမ့်" : "Low");
   return <section className="cycle-section" aria-labelledby="cycle-heading">
-    <div className="cycle-header"><div><h2 id="cycle-heading">{lang === "my" ? "Cycle position" : "Cycle position"}</h2><p className="cycle-subtitle">{lang === "my" ? "Investor psychology အဆင့် ၁၃ ဆင့်ဖြင့် market cycle ကို အချိန်နှင့်တပြေးညီ ခြေရာခံပါ။" : "Track the market cycle in real time through 13 stages of investor psychology."}</p></div></div>
+    <div className="cycle-header"><div><h2 id="cycle-heading">{lang === "my" ? "Cycle position" : "Cycle position"}</h2><p className="cycle-subtitle">{lang === "my" ? "Market Pulse နဲ့ ၇ ရက်ဦးတည်ချက်မှ ခန့်မှန်းထားသော investor psychology အဆင့်။" : "An investor-psychology estimate based on Market Pulse and its 7-day direction."}</p></div></div>
     <div className="cycle-stage-tabs" role="group" aria-label={lang === "my" ? "Cycle အဆင့်တစ်ခုရွေးရန်" : "Choose a cycle stage"}>
       <button type="button" className={`cycle-position-chip${selectedIndex === stageIndex ? " selected" : ""}`} onClick={() => setSelectedIndex(stageIndex)} aria-pressed={selectedIndex === stageIndex}>
         <i style={{ background: current.color }} /><strong>{lang === "my" ? "လက်ရှိအဆင့်" : "Current position"}</strong><span>{lang === "my" ? current.my : current.en}</span>
@@ -402,34 +466,69 @@ function MarketCycle({ data, lang }: { data: Dashboard; lang: Language }) {
     </div>
     <div className="cycle-detail" aria-live="polite">
       <div className="cycle-detail-title"><strong>{lang === "my" ? selected.my : selected.en}</strong><span>“{lang === "my" ? selected.quoteMy : selected.quoteEn}”</span></div>
-      {selectedIndex === stageIndex ? <div className="cycle-current-meta"><span>{lang === "my" ? "ဦးတည်ချက်" : "Direction"} <strong>{directionLabel}</strong></span><span>{lang === "my" ? "အဆင့်" : "Stage"} <strong>{stageIndex + 1}/13</strong></span></div> : null}
+      {selectedIndex === stageIndex ? <>
+        <div className="cycle-current-meta"><span>{lang === "my" ? "ဦးတည်ချက်" : "Direction"} <strong>{directionLabel}</strong></span><span>{lang === "my" ? "အဆင့်" : "Stage"} <strong>{stageIndex + 1}/13</strong></span><span>{lang === "my" ? "ယုံကြည်နိုင်မှု" : "Confidence"} <strong>{confidenceLabel}</strong></span></div>
+        <div className="cycle-evidence" aria-label={lang === "my" ? "Cycle ခန့်မှန်းချက် အထောက်အထား" : "Cycle estimate evidence"}>
+          <span><small>Market Pulse</small><strong>{data.score}/100</strong></span>
+          <span><small>{lang === "my" ? "၁ ရက်ပြောင်းလဲမှု" : "1-day change"}</small><strong>{signedPoints(reading.oneDayDelta)}</strong></span>
+          <span><small>{lang === "my" ? `${reading.lookbackIntervals} ရက်ပြောင်းလဲမှု` : `${reading.lookbackIntervals}-day change`}</small><strong>{signedPoints(reading.sevenDayDelta)}</strong></span>
+        </div>
+        <p className="cycle-rule-note">{lang === "my"
+          ? "တစ်ရက်တာအတက်အကျကြောင့် cycle ဘက်ခြမ်းကို မပြောင်းပါ။ ၇ ရက်အတွင်း အနည်းဆုံး ၄ point တူညီတဲ့ဦးတည်ချက်ရှိမှ Recovering သို့မဟုတ် Declining ဟု သတ်မှတ်သည်။"
+          : "A one-day move does not switch the cycle branch. Recovering or Declining requires a move of at least 4 points over 7 days."}</p>
+      </> : null}
       <p>{lang === "my" ? selected.noteMy : selected.noteEn}</p>
     </div>
+    <p className="cycle-chart-hint">{lang === "my" ? "Graph ပေါ်က point တစ်ခုကို လက်နဲ့ထောက်ပြီး အဆင့်အသေးစိတ်ကြည့်နိုင်ပါတယ်။" : "Touch or point at any marker to inspect that stage."}</p>
     <div className="cycle-chart" role="img" aria-label={`${lang === "my" ? current.my : current.en}, ${stageIndex + 1} of 13, ${directionLabel}`}>
       <span className="cycle-axis-y">{lang === "my" ? "ဈေးနှုန်း" : "PRICE"}</span>
-      <ResponsiveContainer width="100%" height="100%"><ComposedChart data={cycleChartData} margin={{ top: 30, right: 18, bottom: 20, left: 22 }}>
+      <ResponsiveContainer width="100%" height="100%"><ComposedChart
+        data={cycleChartData}
+        margin={{ top: 42, right: 20, bottom: 24, left: 24 }}
+        onClick={(state) => {
+          const activeIndex = Number(state?.activeTooltipIndex);
+          if (!Number.isInteger(activeIndex)) return;
+          setSelectedIndex(activeIndex === 13 ? 0 : Math.min(12, Math.max(0, activeIndex)));
+        }}
+      >
         <defs>
-          <linearGradient id="cycle-line-gradient" x1="0" y1="0" x2="1" y2="0">
-            {cycleStages.map((stage, index) => <stop key={stage.en} offset={`${(index / 12) * 100}%`} stopColor={stage.color} />)}
+          <linearGradient id="cycle-line-gradient" x1="0%" y1="0%" x2="100%" y2="0%">
+            {cycleChartData.map((stage, index) => <stop key={`${stage.en}-${index}`} offset={`${(index / (cycleChartData.length - 1)) * 100}%`} stopColor={stage.color} />)}
           </linearGradient>
-          <linearGradient id="cycle-area-gradient" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#6bcf86" stopOpacity=".18" /><stop offset="100%" stopColor="#6bcf86" stopOpacity=".015" /></linearGradient>
+          <linearGradient id="cycle-area-gradient" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#57c98a" stopOpacity=".27" /><stop offset="58%" stopColor="#57c98a" stopOpacity=".09" /><stop offset="100%" stopColor="#57c98a" stopOpacity=".01" /></linearGradient>
         </defs>
         <CartesianGrid vertical={false} stroke="var(--chart-grid)" strokeDasharray="3 7" />
         <XAxis type="number" dataKey="position" domain={[0, 13]} hide />
         <YAxis domain={[0, 110]} hide />
-        <ReferenceArea x1={Math.max(0, stageIndex - .38)} x2={Math.min(13, stageIndex + .38)} fill={current.color} fillOpacity={.11} strokeOpacity={0} />
-        <ReferenceLine x={stageIndex} stroke={current.color} strokeDasharray="3 4" strokeOpacity={.72} />
-        <Area type="monotone" dataKey="level" stroke="url(#cycle-line-gradient)" strokeWidth={4} fill="url(#cycle-area-gradient)" dot={{ r: 2.7, fill: "var(--surface-strong)", stroke: "#57bb8a", strokeWidth: 1.7 }} isAnimationActive={false}>
-          <LabelList dataKey="label" position="top" className="cycle-chart-label" fill="var(--dim)" fontSize={8} />
+        <Tooltip
+          cursor={{ stroke: "var(--text)", strokeOpacity: .18, strokeDasharray: "3 4" }}
+          allowEscapeViewBox={{ x: false, y: true }}
+          content={({ active, payload }) => {
+            const point = payload?.[0]?.payload;
+            if (!active || !point) return null;
+            const pointIndex = point.position === 13 ? 0 : point.position;
+            const pointStage = cycleStages[pointIndex] ?? cycleStages[0];
+            if (!pointStage) return null;
+            return <div className="cycle-tooltip" style={{ borderColor: pointStage.color }}>
+              <div><i style={{ background: pointStage.color }} /><strong>{lang === "my" ? pointStage.my : pointStage.en}</strong>{pointIndex === stageIndex ? <em>{lang === "my" ? "လက်ရှိ" : "Current"}</em> : null}</div>
+              <span>{lang === "my" ? `အဆင့် ${pointIndex + 1} / 13` : `Stage ${pointIndex + 1} of 13`}</span>
+              <p>“{lang === "my" ? pointStage.quoteMy : pointStage.quoteEn}”</p>
+            </div>;
+          }}
+        />
+        <ReferenceArea x1={Math.max(0, stageIndex - .38)} x2={Math.min(13, stageIndex + .38)} fill={current.color} fillOpacity={.13} strokeOpacity={0} />
+        <ReferenceLine x={stageIndex} stroke={current.color} strokeDasharray="3 4" strokeOpacity={.78} />
+        <Area type="monotone" dataKey="level" stroke="url(#cycle-line-gradient)" strokeWidth={5} fill="url(#cycle-area-gradient)" dot={<CyclePointDot />} activeDot={<CycleActiveDot />} isAnimationActive={false}>
+          <LabelList dataKey="label" position="top" className="cycle-chart-label" fill="var(--dim)" fontSize={9} />
         </Area>
-        {selectedIndex !== stageIndex ? <ReferenceDot x={selectedIndex} y={selected.level} r={5} fill="var(--surface-strong)" stroke={selected.color} strokeWidth={2} /> : null}
-        <ReferenceDot x={stageIndex} y={current.level} r={8} fill="var(--surface-strong)" stroke={current.color} strokeWidth={4} />
+        <ReferenceDot x={5} y={100} r={0} label={{ value: lang === "my" ? "အမြင့်ဆုံး အကောင်းမြင်မှု" : "PEAK OPTIMISM", position: "top", className: "cycle-landmark-label" }} />
+        <ReferenceDot x={11} y={7} r={0} label={{ value: lang === "my" ? "အမြင့်ဆုံး ကြောက်ရွံ့မှု" : "PEAK FEAR", position: "bottom", className: "cycle-landmark-label" }} />
+        {selectedIndex !== stageIndex ? <ReferenceDot x={selectedIndex} y={selected.level} r={6} fill="var(--surface-strong)" stroke={selected.color} strokeWidth={2.5} /> : null}
+        <ReferenceDot x={stageIndex} y={current.level} r={10} fill="var(--surface-strong)" stroke={current.color} strokeWidth={4.5} />
       </ComposedChart></ResponsiveContainer>
       <span className="cycle-axis-x">{lang === "my" ? "အချိန်" : "TIME"} →</span>
-      <span className="cycle-peak">{lang === "my" ? "အမြင့်ဆုံး အကောင်းမြင်မှု" : "PEAK OPTIMISM"}</span>
-      <span className="cycle-low">{lang === "my" ? "အမြင့်ဆုံး ကြောက်ရွံ့မှု" : "PEAK FEAR"}</span>
     </div>
-    <p className="cycle-note">{lang === "my" ? "Market Pulse score နဲ့ လတ်တလောဦးတည်ချက်ကို ပေါင်းစပ်ထားသော ခန့်မှန်းချက်ဖြစ်ပြီး cycle အတည်ပြုချက် မဟုတ်ပါ။" : "An indicative reading derived from the Market Pulse score and its latest direction—not a confirmed market-cycle call."}</p>
+    <p className="cycle-note">{lang === "my" ? "ဤအဆင့်သည် Market Pulse နှင့် ၇ ရက် trend မှတွက်ထားသော ခန့်မှန်းချက်သာဖြစ်ပြီး market-cycle အတည်ပြုချက် မဟုတ်ပါ။ On-chain cycle metrics မပါဝင်သေးသဖြင့် ယုံကြည်နိုင်မှုကို ကန့်သတ်ထားသည်။" : "This stage is an estimate from Market Pulse and its 7-day trend—not a confirmed market-cycle call. Confidence is capped because cycle-specific on-chain metrics are not included."}</p>
   </section>;
 }
 

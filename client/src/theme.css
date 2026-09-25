@@ -808,15 +808,28 @@ button:focus-visible, select:focus-visible, input:focus-visible, a:focus-visible
 .cycle-detail-title span { color: var(--text); font-size: 12px; }
 .cycle-current-meta { display: flex; flex-wrap: wrap; gap: 15px; color: var(--dim); font-size: 10px; }
 .cycle-current-meta strong { color: var(--text); margin-left: 4px; }
+.cycle-evidence { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1px; overflow: hidden; max-width: 520px; border: 1px solid var(--border); border-radius: 8px; background: var(--border); }
+.cycle-evidence > span { display: grid; gap: 3px; min-width: 0; padding: 9px 10px; background: var(--surface-strong); }
+.cycle-evidence small { overflow: hidden; color: var(--dim); font-size: 8px; line-height: 1.25; text-overflow: ellipsis; white-space: nowrap; }
+.cycle-evidence strong { color: var(--text); font-size: 12px; }
 .cycle-detail > p { max-width: 880px; margin: 0; color: var(--dim); font-size: 12px; line-height: 1.65; }
-.cycle-chart { position: relative; height: 310px; margin: 12px 0 0; padding: 0 2px 10px 8px; border-bottom: 1px solid var(--border); }
-.cycle-chart .recharts-reference-area-rect { rx: 4px; }
-.cycle-chart-label { font-weight: 650; paint-order: stroke; stroke: var(--surface-strong); stroke-width: 3px; stroke-linejoin: round; }
-.cycle-axis-y { position: absolute; z-index: 1; top: 50%; left: -15px; color: var(--dim); font: 700 7px ui-monospace, monospace; letter-spacing: .14em; transform: rotate(-90deg); }
-.cycle-axis-x { position: absolute; right: 4px; bottom: 1px; color: var(--dim); font: 700 7px ui-monospace, monospace; letter-spacing: .14em; }
-.cycle-peak, .cycle-low { position: absolute; z-index: 1; color: var(--dim); font: 750 7px ui-monospace, monospace; letter-spacing: .08em; }
-.cycle-peak { left: 39%; top: 39px; }
-.cycle-low { left: 72%; bottom: 48px; }
+.cycle-detail > .cycle-rule-note { max-width: 680px; font-size: 9px; line-height: 1.5; }
+.cycle-chart-hint { display: flex; align-items: center; gap: 7px; margin: 14px 0 0; color: var(--dim); font-size: 9px; line-height: 1.45; }
+.cycle-chart-hint::before { width: 6px; height: 6px; flex: none; border-radius: 50%; background: var(--accent); content: ""; box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 14%, transparent); }
+.cycle-chart { position: relative; height: 370px; margin: 8px 0 0; padding: 0 3px 12px 9px; overflow: visible; border: 1px solid color-mix(in srgb, var(--border) 82%, var(--accent)); border-radius: 12px; background: color-mix(in srgb, var(--surface-strong) 92%, var(--accent)); touch-action: pan-y; }
+.cycle-chart .recharts-wrapper { outline: none; }
+.cycle-chart .recharts-reference-area-rect { rx: 5px; }
+.cycle-chart-label { font-weight: 700; paint-order: stroke; stroke: var(--surface-strong); stroke-width: 3px; stroke-linejoin: round; }
+.cycle-tooltip { min-width: 156px; max-width: 210px; padding: 10px 12px; border: 1px solid; border-radius: 9px; background: color-mix(in srgb, var(--surface-strong) 96%, transparent); color: var(--text); box-shadow: 0 12px 34px rgba(3, 18, 11, .16); pointer-events: none; }
+.cycle-tooltip > div { display: flex; align-items: center; gap: 6px; }
+.cycle-tooltip i { width: 7px; height: 7px; flex: none; border-radius: 50%; }
+.cycle-tooltip strong { font-size: 12px; }
+.cycle-tooltip em { margin-left: auto; color: var(--accent); font-size: 8px; font-style: normal; font-weight: 750; }
+.cycle-tooltip span { display: block; margin-top: 4px; color: var(--dim); font: 650 8px ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .04em; }
+.cycle-tooltip p { margin: 7px 0 0; color: var(--text); font-size: 10px; line-height: 1.45; }
+.cycle-axis-y { position: absolute; z-index: 1; top: 50%; left: -14px; color: var(--dim); font: 700 8px ui-monospace, monospace; letter-spacing: .14em; transform: rotate(-90deg); }
+.cycle-axis-x { position: absolute; right: 10px; bottom: 7px; color: var(--dim); font: 700 8px ui-monospace, monospace; letter-spacing: .14em; }
+.cycle-landmark-label { fill: var(--dim); font: 750 8px ui-monospace, monospace; letter-spacing: .08em; paint-order: stroke; stroke: var(--surface-strong); stroke-width: 3px; stroke-linejoin: round; pointer-events: none; }
 .cycle-note { margin: 16px 0 0; color: var(--dim); font-size: 9px; line-height: 1.55; }
 .asset-mode-switch { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin: 18px 20px 0; padding: 4px; border: 1px solid var(--border); border-radius: 11px; background: var(--surface-strong); }
 .asset-mode-switch button { min-height: 40px; border: 0; border-radius: 8px; background: transparent; color: var(--dim); padding: 0 10px; font-size: 11px; font-weight: 750; cursor: pointer; }
@@ -832,10 +845,10 @@ button:focus-visible, select:focus-visible, input:focus-visible, a:focus-visible
   .cycle-section { padding-inline: 14px; }
   .cycle-header { align-items: flex-start; }
   .cycle-direction { max-width: 96px; text-align: center; white-space: normal; }
-  .cycle-chart { height: 238px; margin-left: -5px; margin-right: -5px; }
+  .cycle-chart { height: 292px; margin-left: -5px; margin-right: -5px; }
   .cycle-chart-label { display: none; }
-  .cycle-peak { left: 37%; top: 31px; }
-  .cycle-low { left: 69%; bottom: 41px; }
+  .cycle-tooltip { min-width: 142px; max-width: 175px; padding: 9px 10px; }
+  .cycle-landmark-label { font-size: 7px; }
   .cycle-stage-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .asset-mode-switch, .manual-price-note { margin-left: 14px; margin-right: 14px; }
   .holding-form-custom { grid-template-columns: 1fr 1fr; }
