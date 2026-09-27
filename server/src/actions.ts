@@ -68,6 +68,13 @@ const liquidationLevelSchema = z.object({
   url: z.string(),
 });
 
+const trendingCoinSchema = z.object({
+  symbol: z.string(),
+  name: z.string(),
+  priceChangePct24h: z.number().nullable(),
+  marketCapRank: z.number().int().nullable(),
+});
+
 const onChainSchema = z.object({
   mvrv: z.number().nullable(),
   exchangeInflowBtc: z.number().nullable(),
@@ -127,6 +134,7 @@ const dashboardSchema = z.object({
   derivatives: z.array(derivativeSchema),
   etfFlows: z.array(etfFlowSchema).default([]),
   liquidationLevels: z.array(liquidationLevelSchema).default([]),
+  trendingCoins: z.array(trendingCoinSchema).default([]),
   onChain: onChainSchema.nullable(),
   economicCalendar: z.array(calendarItemSchema),
   tokenUnlocks: z.array(unlockItemSchema),
@@ -927,6 +935,31 @@ async function fetchLiquidationLevels(ctx: Ctx): Promise<{ items: z.infer<typeof
   }
 }
 
+async function fetchTrendingCoins(): Promise<z.infer<typeof trendingCoinSchema>[]> {
+  try {
+    const payload = (await fetchJson("https://api.coingecko.com/api/v3/search/trending")) as {
+      coins?: Array<{ item?: { symbol?: unknown; name?: unknown; market_cap_rank?: unknown; data?: { price_change_percentage_24h?: { usd?: unknown } } } }>;
+    };
+    const coins = Array.isArray(payload?.coins) ? payload.coins : [];
+    return coins.slice(0, 7).flatMap((entry) => {
+      const item = entry?.item ?? {};
+      const symbol = typeof item.symbol === "string" ? item.symbol.toUpperCase() : "";
+      const name = typeof item.name === "string" ? item.name : "";
+      const rawChange = item.data?.price_change_percentage_24h?.usd;
+      const rawRank = item.market_cap_rank;
+      if (!symbol || !name) return [];
+      return [{
+        symbol,
+        name,
+        priceChangePct24h: typeof rawChange === "number" && Number.isFinite(rawChange) ? rawChange : null,
+        marketCapRank: typeof rawRank === "number" && Number.isInteger(rawRank) ? rawRank : null,
+      }];
+    });
+  } catch (_error) {
+    return [];
+  }
+}
+
 async function fetchOnChain(): Promise<z.infer<typeof onChainSchema> | null> {
   try {
     const payload = coinMetricsSchema.parse(await fetchJson(
@@ -1141,7 +1174,7 @@ async function fetchResearchCalendar(ctx: Ctx): Promise<{
 }
 
 async function fetchLiveDashboard(ctx: Ctx): Promise<Dashboard> {
-  const [statsPayloads, candlesPayload, fearGreedPayload, timePayload, whales, newsResult, whaleCoverageResult, derivatives, etfFlowResult, liquidationResult, onChain, researchCalendar] = await Promise.all([
+  const [statsPayloads, candlesPayload, fearGreedPayload, timePayload, whales, newsResult, whaleCoverageResult, derivatives, etfFlowResult, liquidationResult, onChain, researchCalendar, trendingCoins] = await Promise.all([
     Promise.all(
       PRODUCTS.map(async (product) => {
         try {
@@ -1163,6 +1196,7 @@ async function fetchLiveDashboard(ctx: Ctx): Promise<Dashboard> {
     fetchLiquidationLevels(ctx),
     fetchOnChain(),
     fetchResearchCalendar(ctx),
+    fetchTrendingCoins(),
   ]);
 
   const candles = z.array(candleSchema).parse(candlesPayload);
@@ -1266,6 +1300,7 @@ async function fetchLiveDashboard(ctx: Ctx): Promise<Dashboard> {
     derivatives,
     etfFlows: etfFlowResult.items,
     liquidationLevels: liquidationResult.items,
+    trendingCoins,
     onChain,
     economicCalendar: researchCalendar.economicEvents,
     tokenUnlocks: researchCalendar.tokenUnlocks,
@@ -1278,7 +1313,7 @@ async function fetchLiveDashboard(ctx: Ctx): Promise<Dashboard> {
       refreshedAt: new Date().toISOString(),
     },
     configuredNewsSources: [...CONFIGURED_NEWS_SOURCES],
-    sources: ["Coinbase Exchange", "Alternative.me Fear & Greed Index", "Blockchain.com", ...new Set([...derivatives.map((item) => item.source), ...etfFlowResult.items.map((item) => item.source), ...liquidationResult.items.map((item) => item.source), ...(onChain ? ["Coin Metrics Community"] : []), ...newsResult.providers, ...whaleCoverageResult.providers, ...researchCalendar.economicEvents.map((item) => item.source), ...researchCalendar.tokenUnlocks.map((item) => item.source)])],
+    sources: ["Coinbase Exchange", "Alternative.me Fear & Greed Index", "Blockchain.com", "CoinGecko", ...new Set([...derivatives.map((item) => item.source), ...etfFlowResult.items.map((item) => item.source), ...liquidationResult.items.map((item) => item.source), ...(onChain ? ["Coin Metrics Community"] : []), ...newsResult.providers, ...whaleCoverageResult.providers, ...researchCalendar.economicEvents.map((item) => item.source), ...researchCalendar.tokenUnlocks.map((item) => item.source)])],
   });
 }
 
