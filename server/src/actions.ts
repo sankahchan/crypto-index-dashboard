@@ -73,6 +73,7 @@ const trendingCoinSchema = z.object({
   name: z.string(),
   priceChangePct24h: z.number().nullable(),
   marketCapRank: z.number().int().nullable(),
+  priceUsd: z.number().nullable(),
 });
 
 const onChainSchema = z.object({
@@ -938,7 +939,7 @@ async function fetchLiquidationLevels(ctx: Ctx): Promise<{ items: z.infer<typeof
 async function fetchTrendingCoins(): Promise<z.infer<typeof trendingCoinSchema>[]> {
   try {
     const payload = (await fetchJson("https://api.coingecko.com/api/v3/search/trending")) as {
-      coins?: Array<{ item?: { symbol?: unknown; name?: unknown; market_cap_rank?: unknown; data?: { price_change_percentage_24h?: { usd?: unknown } } } }>;
+      coins?: Array<{ item?: { symbol?: unknown; name?: unknown; market_cap_rank?: unknown; data?: { price?: unknown; price_change_percentage_24h?: { usd?: unknown } } } }>;
     };
     const coins = Array.isArray(payload?.coins) ? payload.coins : [];
     return coins.slice(0, 7).flatMap((entry) => {
@@ -947,12 +948,14 @@ async function fetchTrendingCoins(): Promise<z.infer<typeof trendingCoinSchema>[
       const name = typeof item.name === "string" ? item.name : "";
       const rawChange = item.data?.price_change_percentage_24h?.usd;
       const rawRank = item.market_cap_rank;
+      const rawPrice = item.data?.price;
       if (!symbol || !name) return [];
       return [{
         symbol,
         name,
         priceChangePct24h: typeof rawChange === "number" && Number.isFinite(rawChange) ? rawChange : null,
         marketCapRank: typeof rawRank === "number" && Number.isInteger(rawRank) ? rawRank : null,
+        priceUsd: typeof rawPrice === "number" && Number.isFinite(rawPrice) ? rawPrice : null,
       }];
     });
   } catch (_error) {
