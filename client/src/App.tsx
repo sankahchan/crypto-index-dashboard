@@ -1,8 +1,11 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import {
 Area,
+Bar,
+BarChart,
 CartesianGrid,
+Cell,
 ComposedChart,
 LabelList,
 Legend,
@@ -20,10 +23,13 @@ import { api, type ApiResponse } from "./api";
 
 type Dashboard = NonNullable<ApiResponse<typeof api, "getDashboard">["data"]>;
 type Settings = ApiResponse<typeof api, "getSettings">;
-type Tab = "overview" | "update" | "signals" | "watchlist" | "markets" | "news" | "dca" | "weekly" | "position" | "backtest";
+type Tab = "overview" | "update" | "signals" | "watchlist" | "markets" | "news" | "position" | "backtest" | "dca" | "weekly";
 type Language = "my" | "en";
 type ThemeMode = "auto" | "light" | "dark";
 type TrendRange = "30d" | "90d" | "180d" | "1y" | "all";
+type OverlayRange = "30d" | "90d" | "180d" | "1y";
+type TradingSignalSymbol = "BTC" | "ETH" | "SOL";
+type TradingSignal = NonNullable<ApiResponse<typeof api, "getTradingSignal">["data"]>;
 
 const copy = {
   my: {
@@ -55,9 +61,9 @@ const copy = {
     scenarioPlaybook: "Scenario playbook",
     riskChecklist: "Risk checklist",
     reportSources: "နေ့စဉ် update ရင်းမြစ်များ",
-    automatedDaily: "နေ့စဉ် အလိုအလျောက်အသစ်ရေးပြီး၊ လိုချင်သည့်အချိန်တွင်လည်း ပြန်ယူနိုင်သည်။",
+    automatedDaily: "နေ့စဉ် မနက် 08:22 (လက်ရှိ timezone) တွင် အလိုအလျောက်အသစ်ရေးပြီး၊ လိုချင်သည့်အချိန်တွင်လည်း ပြန်ယူနိုင်သည်။",
     watchlistTab: "Watchlist & Alerts",
-    newsTab: "Social / သတင်း",
+    newsTab: "သတင်း & Whale",
     marketPulse: "MARKET PULSE",
     indexTitle: "Crypto စျေးကွက်ညွှန်းကိန်း",
     methodology: "တွက်ချက်ပုံ",
@@ -116,6 +122,18 @@ const copy = {
     unclassified: "မခွဲခြားရသေး",
     noNews: "Crypto သတင်း data မရနိုင်သေးပါ",
     noNewsHelp: "Refresh ကိုနှိပ်ပြီး လတ်တလောသတင်းများကို ထပ်မံရယူနိုင်သည်။",
+    socialTrends: "Social Trends",
+    socialTrendsHelp: "CoinGecko မှ ၂၄ နာရီအတွင်း ရှာဖွေမှုများသော coin များနှင့် r/CryptoCurrency hot discussion များ။",
+    trendingCoins: "ရှာဖွေမှုများသော Coin များ",
+    hotDiscussions: "လူပြောများသော Discussion များ",
+    searches24h: "CoinGecko · နောက်ဆုံး ၂၄ နာရီ",
+    redditHot: "r/CryptoCurrency · Public",
+    refreshSocial: "Social Trends ပြန်ယူမည်",
+    refreshingSocial: "Social Trends ရယူနေသည်…",
+    socialUnavailable: "Social trend data ကို ယခုမရနိုင်သေးပါ။",
+    marketCapRank: "Market cap အဆင့်",
+    comments: "မှတ်ချက်",
+    points: "ပွိုင့်",
     whaleActivity: "Whale လှုပ်ရှားမှု",
     whaleDescription: (threshold: number) => `Unconfirmed transaction များအနက် output စုစုပေါင်း ${threshold} BTC နှင့်အထက်ကို ပြထားသည်။ Change output ပါဝင်နိုင်သဖြင့် ဝယ်/ရောင်းအဖြစ် မသတ်မှတ်ထားပါ။`,
     noWhales: "သတ်မှတ်အရွယ်အစားထက် ကျော်သော transaction မတွေ့ပါ",
@@ -175,9 +193,9 @@ const copy = {
     scenarioPlaybook: "Scenario playbook",
     riskChecklist: "Risk checklist",
     reportSources: "Daily update sources",
-    automatedDaily: "Regenerated automatically each day, with an on-demand refresh whenever you need it.",
+    automatedDaily: "Regenerated automatically at 08:22 each day in your current timezone, with an on-demand refresh whenever you need it.",
     watchlistTab: "Watchlist & Alerts",
-    newsTab: "Social / News",
+    newsTab: "News & Whales",
     marketPulse: "MARKET PULSE",
     indexTitle: "Crypto Market Index",
     methodology: "Methodology",
@@ -236,6 +254,18 @@ const copy = {
     unclassified: "Unclassified",
     noNews: "Crypto news is unavailable",
     noNewsHelp: "Tap Refresh to try loading the latest stories again.",
+    socialTrends: "Social Trends",
+    socialTrendsHelp: "Coins drawing the most CoinGecko searches in 24 hours and hot discussions from r/CryptoCurrency.",
+    trendingCoins: "Trending coins",
+    hotDiscussions: "Hot discussions",
+    searches24h: "CoinGecko · last 24 hours",
+    redditHot: "r/CryptoCurrency · Public",
+    refreshSocial: "Refresh Social Trends",
+    refreshingSocial: "Refreshing Social Trends…",
+    socialUnavailable: "Social trend data is temporarily unavailable.",
+    marketCapRank: "Market-cap rank",
+    comments: "comments",
+    points: "points",
     whaleActivity: "Whale activity",
     whaleDescription: (threshold: number) => `Shows unconfirmed transactions with at least ${threshold} BTC in total outputs. Totals may include change, so they are not labeled as buys or sells.`,
     noWhales: "No transactions above the threshold were found",
@@ -277,6 +307,17 @@ const compactUsd = new Intl.NumberFormat("en-US", { style: "currency", currency:
 const fullUsd = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 2 });
 const compactNumber = new Intl.NumberFormat("en-US", { maximumFractionDigits: 6 });
 
+function formatCoinUsd(value: number | null) {
+  if (value === null || !Number.isFinite(value)) return "$—";
+  const maximumFractionDigits = value >= 1 ? 2 : value >= 0.01 ? 4 : 8;
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    minimumFractionDigits: value >= 1 ? 2 : 0,
+    maximumFractionDigits,
+  }).format(value);
+}
+
 function sentimentLabel(value: string, lang: Language) {
   return sentimentLabels[lang][value] ?? value;
 }
@@ -299,6 +340,14 @@ function formatDay(value: string, lang: Language) {
   const parsed = new Date(`${value}T00:00:00Z`);
   if (!Number.isFinite(parsed.getTime())) return "—";
   return new Intl.DateTimeFormat(lang === "my" ? "my-MM" : "en-US", { month: "short", day: "numeric", timeZone: "UTC" }).format(parsed);
+}
+
+function formatHistoryTick(value: string, lang: Language, range: TrendRange) {
+  const parsed = new Date(`${value}T00:00:00Z`);
+  if (!Number.isFinite(parsed.getTime())) return "—";
+  if (range === "all") return new Intl.DateTimeFormat(lang === "my" ? "my-MM" : "en-US", { year: "numeric", timeZone: "UTC" }).format(parsed);
+  if (range === "1y") return new Intl.DateTimeFormat(lang === "my" ? "my-MM" : "en-US", { month: "short", year: "2-digit", timeZone: "UTC" }).format(parsed);
+  return formatDay(value, lang);
 }
 
 function Change({ value }: { value: number }) {
@@ -537,6 +586,13 @@ const trendRanges: Array<{ value: TrendRange; label: string; days: number | null
   { value: "all", label: "All", days: null },
 ];
 
+const overlayRanges: Array<{ value: OverlayRange; label: string; days: number }> = [
+  { value: "30d", label: "30D", days: 30 },
+  { value: "90d", label: "90D", days: 90 },
+  { value: "180d", label: "180D", days: 180 },
+  { value: "1y", label: "1Y", days: 365 },
+];
+
 function readingTitle(score: number, lang: Language) {
   if (score < 25) return lang === "my" ? "အလွန်သတိထားရသော reading" : "Defensive reading";
   if (score < 45) return lang === "my" ? "သတိထားရသော reading" : "Cautious reading";
@@ -577,9 +633,16 @@ function HistoricalTrend({ data, lang }: { data: Dashboard; lang: Language }) {
     return changes.sort((a, b) => Math.abs(b.change) - Math.abs(a.change));
   }, [filtered]);
   const shown = expanded ? notable : notable.slice(0, 6);
+  const earliest = filtered[0];
   const latest = filtered.at(-1);
   const previous = filtered.at(-2);
-  const subtitle = lang === "my" ? "ရွေးထားသောကာလအတွင်း Market Pulse reading ပြောင်းလဲပုံကို ကြည့်ပါ။" : "Track how the combined Market Pulse reading changed over the selected window.";
+  const subtitle = earliest && latest
+    ? lang === "my"
+      ? `${formatDay(earliest.date, lang)} မှ ${formatDay(latest.date, lang)} အထိ source နှစ်ခုလုံးတိုက်ဆိုင်သော နေ့စဉ် reading ${filtered.length.toLocaleString()} ခု။`
+      : `${filtered.length.toLocaleString()} source-matched daily readings from ${formatDay(earliest.date, lang)} to ${formatDay(latest.date, lang)}.`
+    : lang === "my"
+      ? "ရွေးထားသောကာလအတွက် source နှစ်ခုလုံးတိုက်ဆိုင်သော reading မရှိသေးပါ။"
+      : "No source-matched readings are available for this window yet.";
   return <section className="historical-trend" aria-labelledby="historical-trend-heading">
     <div className="historical-heading">
       <div><h2 id="historical-trend-heading">{lang === "my" ? "သမိုင်းလမ်းကြောင်း" : "Historical trend"}</h2><p>{subtitle}</p></div>
@@ -591,7 +654,7 @@ function HistoricalTrend({ data, lang }: { data: Dashboard; lang: Language }) {
       <ResponsiveContainer width="100%" height="100%"><ComposedChart data={filtered} margin={{ top: 14, right: 10, bottom: 2, left: -18 }}>
         <defs><linearGradient id="history-area-gradient" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#2ea56c" stopOpacity=".16" /><stop offset="100%" stopColor="#2ea56c" stopOpacity="0" /></linearGradient></defs>
         <CartesianGrid vertical={false} stroke="var(--chart-grid)" strokeDasharray="2 6" />
-        <XAxis dataKey="date" tickFormatter={(value: string) => formatDay(value, lang)} tick={{ fill: "var(--dim)", fontSize: 10 }} axisLine={false} tickLine={false} minTickGap={44} />
+        <XAxis dataKey="date" tickFormatter={(value: string) => formatHistoryTick(value, lang, range)} tick={{ fill: "var(--dim)", fontSize: 10 }} axisLine={false} tickLine={false} minTickGap={44} />
         <YAxis domain={[0, 100]} ticks={[0, 20, 40, 60, 80, 100]} tick={{ fill: "var(--dim)", fontSize: 9 }} axisLine={false} tickLine={false} />
         <Tooltip labelFormatter={(value) => formatDay(String(value), lang)} formatter={(value) => [`${value}/100`, lang === "my" ? "Reading" : "Reading"]} contentStyle={{ background: "var(--surface-strong)", border: "1px solid var(--border)", borderRadius: 9, fontSize: 11 }} />
         <Area type="monotone" dataKey="score" stroke="#2ea56c" strokeWidth={2.5} fill="url(#history-area-gradient)" dot={false} activeDot={{ r: 4 }} isAnimationActive={false} />
@@ -616,7 +679,16 @@ function HistoricalTrend({ data, lang }: { data: Dashboard; lang: Language }) {
 
 function Overview({ data, lang, onOpenMethod }: { data: Dashboard; lang: Language; onOpenMethod: () => void }) {
   const t = copy[lang];
-  const chartData = useMemo(() => data.history, [data.history]);
+  const [overlayRange, setOverlayRange] = useState<OverlayRange>("30d");
+  const selectedOverlayRange = overlayRanges.find((item) => item.value === overlayRange) ?? overlayRanges[0];
+  const chartData = useMemo(() => {
+    const ordered = [...data.history].sort((a, b) => a.date.localeCompare(b.date));
+    const latest = ordered.at(-1);
+    if (!latest) return ordered;
+    const end = new Date(`${latest.date}T00:00:00Z`).getTime();
+    const cutoff = end - ((selectedOverlayRange?.days ?? 30) - 1) * 86_400_000;
+    return ordered.filter((point) => new Date(`${point.date}T00:00:00Z`).getTime() >= cutoff);
+  }, [data.history, selectedOverlayRange]);
   const latestPoint = chartData.at(-1);
   const previousPoint = chartData.at(-2);
   const latestDirection = latestPoint && previousPoint ? latestPoint.score - previousPoint.score : 0;
@@ -630,8 +702,13 @@ function Overview({ data, lang, onOpenMethod }: { data: Dashboard; lang: Languag
             <ScoreGauge score={data.score} lang={lang} />
           </section>
           <section className="chart-section" aria-labelledby="trend-heading">
-            <div className="section-heading"><div><p className="eyebrow">{t.thirtyDays}</p><h2 id="trend-heading">{t.overlayTitle}</h2></div></div>
-            {chartData.length > 1 ? <div className="chart-wrap chart-wrap-tall" role="img" aria-label={t.chartAria}><ResponsiveContainer width="100%" height="100%"><LineChart data={chartData} margin={{ top: 12, right: 6, bottom: 2, left: -18 }}><CartesianGrid vertical={false} stroke="var(--chart-grid)" strokeDasharray="3 6" /><XAxis dataKey="date" tickFormatter={(value: string) => formatDay(value, lang)} tick={{ fill: "var(--dim)", fontSize: 10 }} axisLine={false} tickLine={false} minTickGap={34} /><YAxis yAxisId="index" domain={[0, 100]} ticks={[0, 25, 50, 75, 100]} tick={{ fill: "var(--dim)", fontSize: 10 }} axisLine={false} tickLine={false} /><YAxis yAxisId="btc" orientation="right" domain={["auto", "auto"]} tickFormatter={(value: number) => compactUsd.format(value)} tick={{ fill: "var(--dim)", fontSize: 10 }} axisLine={false} tickLine={false} width={56} /><Tooltip labelFormatter={(value) => formatDay(String(value), lang)} formatter={(value, name) => [name === t.btcPrice ? fullUsd.format(Number(value)) : `${value}/100`, name]} contentStyle={{ background: "var(--surface-strong)", border: "1px solid var(--border)", borderRadius: 10, fontSize: 11 }} /><Legend wrapperStyle={{ color: "var(--dim)", fontSize: 11, paddingTop: 8 }} /><Line yAxisId="index" type="monotone" dataKey="score" name="Market Pulse" stroke="#48d597" strokeWidth={3} dot={false} activeDot={{ r: 5 }} /><Line yAxisId="btc" type="monotone" dataKey="btcPrice" name={t.btcPrice} stroke="#f4b740" strokeWidth={2} dot={false} activeDot={{ r: 4 }} /></LineChart></ResponsiveContainer></div> : <p className="empty-inline">{t.noTrend}</p>}
+            <div className="overlay-chart-heading">
+              <div><p className="eyebrow">{selectedOverlayRange?.label ?? "30D"}</p><h2 id="trend-heading">{t.overlayTitle}</h2></div>
+              <div className="range-control overlay-range-control" role="group" aria-label={lang === "my" ? "Index နှင့် BTC chart ကာလ ရွေးချယ်ရန်" : "Select index and BTC chart range"}>
+                {overlayRanges.map((item) => <button type="button" key={item.value} aria-pressed={overlayRange === item.value} onClick={() => setOverlayRange(item.value)}>{item.label}</button>)}
+              </div>
+            </div>
+            {chartData.length > 1 ? <div className="chart-wrap chart-wrap-tall" role="img" aria-label={`${t.chartAria}, ${selectedOverlayRange?.label ?? "30D"}`}><ResponsiveContainer width="100%" height="100%"><LineChart data={chartData} margin={{ top: 12, right: 6, bottom: 2, left: -18 }}><CartesianGrid vertical={false} stroke="var(--chart-grid)" strokeDasharray="3 6" /><XAxis dataKey="date" tickFormatter={(value: string) => formatHistoryTick(value, lang, overlayRange)} tick={{ fill: "var(--dim)", fontSize: 10 }} axisLine={false} tickLine={false} minTickGap={34} /><YAxis yAxisId="index" domain={[0, 100]} ticks={[0, 25, 50, 75, 100]} tick={{ fill: "var(--dim)", fontSize: 10 }} axisLine={false} tickLine={false} /><YAxis yAxisId="btc" orientation="right" domain={["auto", "auto"]} tickFormatter={(value: number) => compactUsd.format(value)} tick={{ fill: "var(--dim)", fontSize: 10 }} axisLine={false} tickLine={false} width={56} /><Tooltip labelFormatter={(value) => formatDay(String(value), lang)} formatter={(value, name) => [name === t.btcPrice ? fullUsd.format(Number(value)) : `${value}/100`, name]} contentStyle={{ background: "var(--surface-strong)", border: "1px solid var(--border)", borderRadius: 10, fontSize: 11 }} /><Legend wrapperStyle={{ color: "var(--dim)", fontSize: 11, paddingTop: 8 }} /><Line yAxisId="index" type="monotone" dataKey="score" name="Market Pulse" stroke="#48d597" strokeWidth={3} dot={false} activeDot={{ r: 5 }} isAnimationActive={false} /><Line yAxisId="btc" type="monotone" dataKey="btcPrice" name={t.btcPrice} stroke="#f4b740" strokeWidth={2} dot={false} activeDot={{ r: 4 }} isAnimationActive={false} /></LineChart></ResponsiveContainer></div> : <p className="empty-inline">{t.noTrend}</p>}
           </section>
         </div>
         <aside className="side-column">
@@ -836,7 +913,7 @@ function PortfolioTracker({ data, settings, lang, onSettingsChange }: { data: Da
       <label>{lang === "my" ? "ပမာဏ" : "Quantity"}<input inputMode="decimal" value={quantity} onChange={(event) => setQuantity(event.target.value)} placeholder="0.00" aria-label={lang === "my" ? "Coin ပမာဏ" : "Coin quantity"} /></label>
       <label>{lang === "my" ? "ပျမ်းမျှဝယ်ဈေး (USD၊ မလိုလျှင်ချန်ထား)" : "Average cost (USD, optional)"}<input inputMode="decimal" value={averageCost} onChange={(event) => setAverageCost(event.target.value)} placeholder="0.00" aria-label={lang === "my" ? "ပျမ်းမျှဝယ်ဈေး" : "Average cost"} /></label>
       <label>{lang === "my" ? "ဝယ်ယူရက် (BTC benchmark အတွက်)" : "Acquisition date (for BTC benchmark)"}<input type="date" value={acquiredOn} max={new Date().toISOString().slice(0, 10)} onChange={(event) => setAcquiredOn(event.target.value)} aria-label={lang === "my" ? "ဝယ်ယူရက်" : "Acquisition date"} /></label>
-      <button className="primary-button" type="submit" disabled={save.isPending || Number(quantity) <= 0 || (customMode && (!/^[A-Z0-9]{2,12}$/.test(customSymbol) || customName.trim().length < 2 || Number(manualPrice) <= 0))}>{save.isPending ? (lang === "my" ? "သိမ်းနေသည်…" : "Saving…") : (lang === "my" ? "Holding သိမ်းမည်" : "Save holding")}</button>
+      <button className="primary-button holding-save-button" type="submit" disabled={save.isPending || Number(quantity) <= 0 || (customMode && (!/^[A-Z0-9]{2,12}$/.test(customSymbol) || customName.trim().length < 2 || Number(manualPrice) <= 0))}>{save.isPending ? (lang === "my" ? "သိမ်းနေသည်…" : "Saving…") : (lang === "my" ? "Holding သိမ်းမည်" : "Save holding")}</button>
     </form>
     {customMode ? <p className="manual-price-note">{lang === "my" ? "Manual coin ဈေးသည် live feed မဟုတ်ပါ။ တန်ဖိုးမှန်ကန်စေရန် coin ကို ထပ်ရွေးပြီး လက်ရှိဈေးကို အချိန်မရွေး update လုပ်နိုင်သည်။" : "Manual prices are not live. Re-enter the same symbol anytime to update its current price and portfolio value."}</p> : null}
 
@@ -888,12 +965,29 @@ function WatchlistAndAlerts({ data, settings, lang, onSettingsChange, onRefresh 
   );
 }
 
-function NewsAndWhales({ data, lang }: { data: Dashboard; lang: Language }) {
+function NewsAndWhales({ data, lang, onRefreshSocial, refreshingSocial, socialRefreshMessage }: { data: Dashboard; lang: Language; onRefreshSocial: () => void; refreshingSocial: boolean; socialRefreshMessage: string | null }) {
   const t = copy[lang];
   const total = Math.max(data.newsSentiment.total, 1);
+  const trends = data.socialTrends;
+  const btcUsd = data.quotes.find((quote) => quote.symbol === "BTC")?.price ?? null;
+  const hasSocialRows = trends.coins.length > 0 || trends.redditPosts.length > 0;
   return (
-    <>
-    <div className="feature-grid feature-grid-wide">
+    <div className="news-page">
+      <section className="social-trends-section" aria-labelledby="social-trends-heading">
+        <div className="social-trends-head">
+          <div><p className="eyebrow">DISCOVERY + COMMUNITY</p><h1 id="social-trends-heading">{t.socialTrends}</h1><p>{t.socialTrendsHelp}</p></div>
+          <div className="social-refresh-wrap"><button className="refresh-button" onClick={onRefreshSocial} disabled={refreshingSocial} aria-label={t.refreshSocial}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6v5h-5M4 18v-5h5M18.2 9A7 7 0 0 0 6.4 6.4L4 9m16 6-2.4 2.6A7 7 0 0 1 5.8 15" /></svg><span>{refreshingSocial ? t.refreshingSocial : t.refreshSocial}</span></button>{trends.fetchedAt ? <span>{t.checked} · {formatTime(trends.fetchedAt, lang)}</span> : null}</div>
+        </div>
+        {socialRefreshMessage ? <div className="status-banner social-status" role="status">{socialRefreshMessage}</div> : null}
+        {hasSocialRows ? <div className="social-trends-grid">
+          <section aria-labelledby="trending-coins-heading"><div className="social-column-head"><div><span>01</span><h2 id="trending-coins-heading">{t.trendingCoins}</h2></div><small>{t.searches24h}</small></div>{trends.coins.length > 0 ? <ol className="trend-coin-list">{trends.coins.map((coin) => {
+            const priceUsd = coin.priceUsd ?? (coin.priceBtc !== null && btcUsd !== null ? coin.priceBtc * btcUsd : null);
+            return <li key={coin.id}><span className="trend-rank">{String(coin.rank).padStart(2, "0")}</span><div><strong>{coin.name}</strong><span>{coin.symbol}{coin.marketCapRank ? ` · ${t.marketCapRank} #${coin.marketCapRank}` : ""}</span></div><div className="trend-coin-metric"><strong className="trend-coin-price">{formatCoinUsd(priceUsd)}</strong>{coin.change24hPct === null ? <span>24h —</span> : <span className={coin.change24hPct >= 0 ? "change-positive" : "change-negative"}>24h {coin.change24hPct >= 0 ? "+" : ""}{coin.change24hPct.toFixed(2)}%</span>}<span>{coin.priceBtc === null ? "BTC —" : `${compactNumber.format(coin.priceBtc)} BTC`}</span></div></li>;
+          })}</ol> : <div className="empty-panel"><strong>{t.socialUnavailable}</strong><span>CoinGecko Trending</span></div>}</section>
+          <section aria-labelledby="hot-discussions-heading"><div className="social-column-head"><div><span>02</span><h2 id="hot-discussions-heading">{t.hotDiscussions}</h2></div><small>{t.redditHot}</small></div>{trends.redditPosts.length > 0 ? <div className="reddit-trend-list">{trends.redditPosts.map((post) => <a key={post.id} href={post.url} target="_blank" rel="noreferrer"><strong>{post.title}</strong><span>{post.score === null || post.comments === null ? (lang === "my" ? "Public result · engagement မရရှိပါ" : "Public result · engagement unavailable") : `${post.score.toLocaleString()} ${t.points} · ${post.comments.toLocaleString()} ${t.comments}`}{post.publishedAt ? ` · ${formatTime(post.publishedAt, lang)}` : ""}</span></a>)}</div> : <div className="empty-panel"><strong>{t.socialUnavailable}</strong><span>r/CryptoCurrency</span></div>}</section>
+        </div> : <div className="empty-panel"><strong>{t.socialUnavailable}</strong><span>{lang === "my" ? "Refresh နှိပ်ပြီး ရင်းမြစ်နှစ်ခုကို ထပ်စစ်နိုင်သည်။" : "Tap Refresh to check both sources again."}</span></div>}
+      </section>
+      <div className="feature-grid feature-grid-wide">
       <section className="feature-section" aria-labelledby="news-heading">
         <div className="section-heading">
           <div><p className="eyebrow">NEWS SENTIMENT</p><h1 id="news-heading">{t.cryptoNews}</h1></div>
@@ -922,12 +1016,8 @@ function NewsAndWhales({ data, lang }: { data: Dashboard; lang: Language }) {
         <div className="whale-coverage-heading"><p className="eyebrow">SOURCE COVERAGE</p><h3>{t.whaleCoverage}</h3><p>{t.whaleCoverageHelp}</p></div>
         {data.whaleCoverage.length > 0 ? <div className="news-list whale-news-list">{data.whaleCoverage.map((item, index) => <article className="news-row" key={`${item.headline}-${index}`}><div className={`sentiment-dot sentiment-${item.sentiment}`} aria-label={item.sentiment} /><div>{item.url ? <a href={item.url} target="_blank" rel="noreferrer">{item.headline}</a> : <strong>{item.headline}</strong>}<p>{lang === "my" ? item.summaryMm ?? item.summaryEn : item.summaryEn}</p><span>{item.source}{item.publishedAt ? ` · ${formatTime(item.publishedAt, lang)}` : ""}</span></div></article>)}</div> : <p className="coverage-empty">{t.noWhaleCoverage}</p>}
       </section>
+      </div>
     </div>
-    <div className="feature-grid feature-grid-wide social-extra-grid">
-      <SocialTrends data={data} lang={lang} />
-      <HotDiscussions data={data} lang={lang} />
-    </div>
-    </>
   );
 }
 
@@ -939,17 +1029,15 @@ function MarketIntelligence({ data, lang, onRefresh, refreshing, refreshMessage 
   const t = copy[lang];
   const status = data.marketIntelligenceStatus;
   const derivativeSources = [...new Set(data.derivatives.map((item) => item.source))];
+  const heatScore = (intensity: "light" | "moderate" | "heavy") => intensity === "heavy" ? 3 : intensity === "moderate" ? 2 : 1;
+  const heatLabel = (intensity: "light" | "moderate" | "heavy") => intensity === "heavy"
+    ? (lang === "my" ? "အပူမြင့်" : "Heavy")
+    : intensity === "moderate"
+      ? (lang === "my" ? "အပူအလတ်" : "Moderate")
+      : (lang === "my" ? "အပူနည်း" : "Light");
+  const liquidationChartData = data.liquidationLevels.map((item) => ({ ...item, priceLabel: fullUsd.format(item.priceUsd), heatScore: heatScore(item.intensity) }));
   const emptyMessage = (feedStatus: "ok" | "empty" | "unavailable" | undefined) => feedStatus === "empty" ? t.noUpcomingEvents : t.sourceUnavailable;
   const savedWarning = (feedStatus: "ok" | "empty" | "unavailable" | undefined, hasRows: boolean) => feedStatus === "unavailable" && hasRows ? <p className="feed-warning" role="status">{t.savedWhileUnavailable}</p> : null;
-  const liqLevels = [...data.liquidationLevels].sort((a, b) => b.magnitudeUsd - a.magnitudeUsd);
-  const liqMax = liqLevels[0]?.magnitudeUsd ?? 1;
-  const liqIntensity = (magnitude: number) => {
-    const ratio = magnitude / liqMax;
-    if (ratio >= 0.66) return "heavy";
-    if (ratio >= 0.33) return "medium";
-    return "light";
-  };
-  const liqIntensityLabel = (level: "heavy" | "medium" | "light") => level === "heavy" ? (lang === "my" ? "ပြင်းထန်" : "Heavy") : level === "medium" ? (lang === "my" ? "အလယ်အလတ်" : "Medium") : (lang === "my" ? "ပေါ့ပါး" : "Light");
   return <div className="intel-layout">
     <section className="feature-section intel-heading" aria-labelledby="intel-heading">
       <div><p className="eyebrow">MARKET INTELLIGENCE</p><h1 id="intel-heading">{lang === "my" ? "Derivatives၊ Macro နှင့် On-chain" : "Derivatives, macro & on-chain"}</h1><p className="section-description">{lang === "my" ? "Leverage အနေအထား၊ US macro event များနှင့် Bitcoin network signal များ။" : "Leverage positioning, US macro events, and Bitcoin network signals."}</p></div>
@@ -965,7 +1053,7 @@ function MarketIntelligence({ data, lang, onRefresh, refreshing, refreshMessage 
     <section className="intel-card" aria-labelledby="liquidation-heading">
       <div className="intel-card-head"><div><p className="eyebrow">BTC LIQUIDATIONS</p><h2 id="liquidation-heading">{lang === "my" ? "Liquidation heat levels" : "Liquidation heat levels"}</h2></div><span>{lang === "my" ? "ထုတ်ပြန်ထားသော cluster များ" : "Published clusters"}</span></div>
       {savedWarning(status?.liquidations, data.liquidationLevels.length > 0)}
-      {liqLevels.length > 0 ? <><div className="liquidation-intensity-list" role="img" aria-label={lang === "my" ? "BTC liquidation level magnitude ဇယား" : "BTC liquidation level magnitude chart"}>{liqLevels.map((item) => { const level = liqIntensity(item.magnitudeUsd); return <div key={`${item.priceUsd}-${item.side}`} className="liquidation-intensity-row"><div className="liquidation-intensity-meta"><strong>{fullUsd.format(item.priceUsd)}</strong><span>{item.side === "long_below" ? (lang === "my" ? "Longs အောက်ဘက်" : "Longs below") : (lang === "my" ? "Shorts အပေါ်ဘက်" : "Shorts above")} · {item.timeframe}</span></div><div className="liquidation-intensity-track"><span className={`liquidation-intensity-bar intensity-${level}`} style={{ width: `${Math.max(4, (item.magnitudeUsd / liqMax) * 100)}%` }} /></div><div className="liquidation-intensity-value"><b className={`intensity-label intensity-${level}`}>{liqIntensityLabel(level)}</b><span>{compactUsd.format(item.magnitudeUsd)}</span></div></div>; })}</div><div className="intensity-legend" aria-label={lang === "my" ? "ပြင်းထန်မှု အဆင့်" : "Intensity levels"}>{(["heavy", "medium", "light"] as const).map((level) => <span key={level}><i className={`intensity-label intensity-${level}`} />{liqIntensityLabel(level)}</span>)}</div><div className="liquidation-level-list">{liqLevels.map((item) => <a key={`${item.priceUsd}-${item.side}`} href={item.url} target="_blank" rel="noreferrer"><i className={item.side === "long_below" ? "long-level" : "short-level"} /><span>{item.side === "long_below" ? (lang === "my" ? "Longs အောက်ဘက်" : "Longs below") : (lang === "my" ? "Shorts အပေါ်ဘက်" : "Shorts above")} · {item.timeframe}</span><strong>{fullUsd.format(item.priceUsd)} · {compactUsd.format(item.magnitudeUsd)}</strong><small>{item.source}</small></a>)}</div></> : <div className="empty-panel"><strong>{status?.liquidations === "unavailable" ? t.sourceUnavailable : (lang === "my" ? "ပမာဏပါသော liquidation cluster မတွေ့ပါ" : "No quantified liquidation cluster was found")}</strong><span>{lang === "my" ? "အတု level မဖြည့်ထားပါ။ Refresh လုပ်၍ public report အသစ်ကို စစ်နိုင်သည်။" : "No synthetic levels are shown. Refresh to check new public reports."}</span></div>}
+      {data.liquidationLevels.length > 0 ? <><div className="liquidation-scale-note"><span>{lang === "my" ? "ထုတ်ပြန်ထားသော relative heat" : "Published relative heat"}</span><div><i className="heat-light" />{lang === "my" ? "နည်း" : "Light"}<i className="heat-moderate" />{lang === "my" ? "အလတ်" : "Moderate"}<i className="heat-heavy" />{lang === "my" ? "မြင့်" : "Heavy"}</div></div><div className="liquidation-chart" role="img" aria-label={lang === "my" ? "BTC liquidation level relative heat ဇယား" : "BTC liquidation level relative heat chart"}><ResponsiveContainer width="100%" height="100%"><BarChart layout="vertical" data={liquidationChartData} margin={{ top: 8, right: 20, bottom: 18, left: 18 }}><CartesianGrid horizontal={false} stroke="var(--chart-grid)" strokeDasharray="3 6" /><XAxis type="number" domain={[0, 3]} ticks={[1, 2, 3]} tickFormatter={(value: number) => value === 3 ? (lang === "my" ? "မြင့်" : "Heavy") : value === 2 ? (lang === "my" ? "အလတ်" : "Moderate") : (lang === "my" ? "နည်း" : "Light")} tick={{ fill: "var(--dim)", fontSize: 10 }} axisLine={false} tickLine={false} /><YAxis type="category" dataKey="priceLabel" width={78} tick={{ fill: "var(--text)", fontSize: 10 }} axisLine={false} tickLine={false} /><Tooltip formatter={(value) => [Number(value) === 3 ? heatLabel("heavy") : Number(value) === 2 ? heatLabel("moderate") : heatLabel("light"), lang === "my" ? "Relative heat" : "Relative heat"]} contentStyle={{ background: "var(--surface-strong)", border: "1px solid var(--border)", borderRadius: 9, fontSize: 11 }} /><Bar dataKey="heatScore" name="Relative heat" radius={[0, 5, 5, 0]}>{data.liquidationLevels.map((item, index) => <Cell key={`${item.priceUsd}-${index}`} fill={item.side === "long_below" ? "#e4635b" : "#2fb481"} />)}</Bar></BarChart></ResponsiveContainer></div><div className="liquidation-level-list">{data.liquidationLevels.map((item) => <a key={`${item.priceUsd}-${item.side}`} href={item.url} target="_blank" rel="noreferrer"><i className={item.side === "long_below" ? "long-level" : "short-level"} /><span>{item.side === "long_below" ? (lang === "my" ? "Longs အောက်ဘက်" : "Longs below") : (lang === "my" ? "Shorts အပေါ်ဘက်" : "Shorts above")} · {item.timeframe}</span><strong>{fullUsd.format(item.priceUsd)} · {item.magnitudeUsd === null ? heatLabel(item.intensity) : `${compactUsd.format(item.magnitudeUsd)} · ${heatLabel(item.intensity)}`}</strong><small>{item.source}{item.asOfDate ? ` · ${lang === "my" ? "ကြည့်ရှုချိန်" : "As of"} ${formatDay(item.asOfDate, lang)}` : ""}</small></a>)}</div><p className="intel-note">{lang === "my" ? "Heatmap cluster များသည် ခန့်မှန်း leverage concentration ဖြစ်ပြီး support / resistance အတည်ပြုချက် မဟုတ်ပါ။" : "Heatmap clusters are estimated leverage concentrations, not confirmed support or resistance."}</p></> : <div className="empty-panel"><strong>{status?.liquidations === "unavailable" ? t.sourceUnavailable : (lang === "my" ? "လွန်ခဲ့သော ၁၄ ရက်အတွင်း liquidation heat level မတွေ့ပါ" : "No liquidation heat level observed in the last 14 days was found")}</strong><span>{lang === "my" ? "Refresh လုပ်၍ လွန်ခဲ့သော ၁၄ ရက်အတွင်း စောင့်ကြည့်ထားသော public heatmap ကို ထပ်စစ်နိုင်သည်။" : "Refresh to check for public heatmaps observed within the last 14 days."}</span></div>}
     </section>
     <section className="intel-card" aria-labelledby="onchain-heading"><div className="intel-card-head"><div><p className="eyebrow">BITCOIN NETWORK</p><h2 id="onchain-heading">On-chain signals</h2></div><span>{data.onChain?.source ?? "Coin Metrics Community"}</span></div>{data.onChain ? <><div className="metric-grid"><div><span>MVRV</span><strong>{formatOptional(data.onChain.mvrv, (value) => value.toFixed(2))}</strong></div><div><span>Exchange netflow</span><strong>{formatOptional(data.onChain.exchangeNetflowBtc, (value) => `${value >= 0 ? "+" : ""}${compactNumber.format(value)} BTC`)}</strong></div><div><span>Active addresses</span><strong>{formatOptional(data.onChain.activeAddresses, (value) => compactNumber.format(value))}</strong></div><div><span>Transactions</span><strong>{formatOptional(data.onChain.transactions, (value) => compactNumber.format(value))}</strong></div></div><p className="intel-note">{lang === "my" ? "Netflow အပေါင်းဆိုလျှင် exchange ထဲဝင်သည့် BTC က ပိုများပြီး အနုတ်ဆိုလျှင် ထွက်သည့် BTC က ပိုများသည်။" : "Positive netflow means more BTC moved into tracked exchanges; negative means more moved out."} · {formatTime(data.onChain.asOf, lang)}</p></> : <div className="empty-panel"><strong>{t.sourceUnavailable}</strong></div>}</section>
     <section className="intel-card" aria-labelledby="economic-heading"><div className="intel-card-head"><div><p className="eyebrow">NEXT 35 DAYS</p><h2 id="economic-heading">Economic calendar</h2></div><span>US macro</span></div>{savedWarning(status?.economicCalendar, data.economicCalendar.length > 0)}{data.economicCalendar.length > 0 ? <div className="event-list">{data.economicCalendar.map((item) => <article key={`${item.date}-${item.title}`} className="event-row"><time dateTime={item.date}>{formatDay(item.date, lang)}</time><div><div className="event-title-line"><h3>{item.title}</h3><span className={`importance ${item.importance}`}>{item.importance}</span></div><p>{lang === "my" ? item.whyItMattersMm : item.whyItMattersEn}</p><a href={item.url} target="_blank" rel="noreferrer">{item.source} ↗</a></div></article>)}</div> : <div className="empty-panel"><strong>{emptyMessage(status?.economicCalendar)}</strong></div>}</section>
@@ -973,16 +1061,137 @@ function MarketIntelligence({ data, lang, onRefresh, refreshing, refreshMessage 
   </div>;
 }
 
+type RadarTimeframe = "15m" | "4H" | "1D";
+
+const radarTimeframes: Array<{ value: RadarTimeframe; label: string; seconds: number }> = [
+  { value: "15m", label: "15m", seconds: 900 },
+  { value: "4H", label: "4H", seconds: 14_400 },
+  { value: "1D", label: "1D", seconds: 86_400 },
+];
+
+function radarDuration(candles: number, timeframe: RadarTimeframe, lang: Language) {
+  const frame = radarTimeframes.find((item) => item.value === timeframe) ?? radarTimeframes[2];
+  const totalHours = candles * (frame?.seconds ?? 86_400) / 3600;
+  if (totalHours < 24) {
+    const hours = Math.floor(totalHours);
+    const minutes = Math.round((totalHours - hours) * 60);
+    return lang === "my" ? `ခန့်မှန်း ${hours} နာရီ ${minutes > 0 ? `${minutes} မိနစ်` : ""}`.trim() : `about ${hours}h${minutes > 0 ? ` ${minutes}m` : ""}`;
+  }
+  const days = totalHours / 24;
+  const rendered = days < 10 ? days.toFixed(days % 1 === 0 ? 0 : 1) : Math.round(days).toString();
+  return lang === "my" ? `ခန့်မှန်း ${rendered} ရက်` : `about ${rendered} days`;
+}
+
+function EmaCrossRadar({ lang, onSettingsChange }: { lang: Language; onSettingsChange: (settings: Settings) => void }) {
+  const queryClient = useQueryClient();
+  const [timeframe, setTimeframe] = useState<RadarTimeframe>("1D");
+  const query = useQuery({
+    queryKey: ["ema-cross-radar", timeframe],
+    queryFn: () => api.getEmaCrossRadar({ timeframe }),
+    staleTime: 15 * 60 * 1000,
+  });
+  const refresh = useMutation({
+    mutationFn: (selected: RadarTimeframe) => api.refreshEmaCrossRadar({ timeframe: selected }),
+    onSuccess: async (next, selected) => {
+      queryClient.setQueryData(["ema-cross-radar", selected], next);
+      onSettingsChange(await api.getSettings({}));
+    },
+  });
+  const result = refresh.data && refresh.variables === timeframe ? refresh.data : query.data;
+  const data = result?.data ?? null;
+  const statusMessage = result?.status === "stale" || result?.status === "cached"
+    ? (lang === "my" ? result.message : result.messageEn)
+    : null;
+  const frameLabel = timeframe === "15m" ? (lang === "my" ? "၁၅ မိနစ်" : "15-minute") : timeframe === "4H" ? (lang === "my" ? "၄ နာရီ" : "4-hour") : (lang === "my" ? "၁ ရက်" : "daily");
+  const isLoading = query.isPending || (refresh.isPending && refresh.variables === timeframe);
+  return <section className="ema-radar" aria-labelledby="ema-radar-heading">
+    <div className="ema-radar-head">
+      <div><p className="eyebrow">MULTI-TIMEFRAME MARKET SCANNER</p><h2 id="ema-radar-heading">EMA Cross Radar</h2><p>{lang === "my" ? "Coinbase USD spot coin များထဲမှ EMA 50 က EMA 200 အောက်တွင်ရှိနေပြီး ၂% အတွင်း နီးကပ်လာသည့် golden cross setup များကို timeframe တစ်ခုချင်းစီအလိုက် ရှာသည်။" : "Scans Coinbase USD spot coins independently by timeframe for golden-cross setups where EMA 50 remains below EMA 200, sits within 2%, and is converging."}</p></div>
+      <div className="radar-timeframe-switch" role="group" aria-label={lang === "my" ? "EMA Radar timeframe" : "EMA Radar timeframe"}>
+        {radarTimeframes.map((item) => <button key={item.value} type="button" aria-pressed={timeframe === item.value} onClick={() => setTimeframe(item.value)}><strong>{item.label}</strong><span>{item.value === "15m" ? "900s" : item.value === "4H" ? "14400s" : "86400s"}</span></button>)}
+      </div>
+    </div>
+    <div className="ema-radar-toolbar">
+      <p>{data ? <>{lang === "my" ? `${data.scannedCount}/${data.universeSize} coin စစ်ပြီး · ${data.timeframe} နောက်ဆုံး scan ${formatTime(data.generatedAt, lang)} · ${data.scanOrigin === "automatic" ? "အလိုအလျောက်" : "ကိုယ်တိုင်"}` : `${data.scannedCount}/${data.universeSize} coins scanned · ${data.timeframe} last scan ${formatTime(data.generatedAt, lang)} · ${data.scanOrigin === "automatic" ? "Automatic" : "Manual"}`} · {data.source}</> : (lang === "my" ? `${timeframe} broad-market scan ကို ရယူနေသည်…` : `Loading the ${timeframe} broad-market scan…`)}</p>
+      <button className="refresh-button" onClick={() => refresh.mutate(timeframe)} disabled={isLoading} aria-label={lang === "my" ? `${timeframe} EMA Cross Radar ပြန်စစ်မည်` : `Refresh ${timeframe} EMA Cross Radar`}>{isLoading ? (lang === "my" ? "Scan လုပ်နေသည်…" : "Scanning…") : (lang === "my" ? `${timeframe} Radar ပြန်စစ်မည်` : `Refresh ${timeframe} radar`)}</button>
+    </div>
+    {statusMessage ? <div className="status-banner" role="status">{statusMessage}</div> : null}
+    {!data && query.isPending ? <div className="radar-loading" aria-live="polite"><div className="loader" /><p>{lang === "my" ? `Coin စာရင်းနှင့် ${frameLabel} candle များကို စစ်နေသည်…` : `Checking the coin universe and ${frameLabel} candles…`}</p></div> : null}
+    {!data && !query.isPending ? <div className="empty-panel"><strong>{lang === "my" ? `${timeframe} EMA Radar data မရနိုင်သေးပါ` : `${timeframe} EMA Radar is unavailable`}</strong><span>{lang === "my" ? "Refresh ကိုနှိပ်ပြီး Coinbase ကို ထပ်စစ်နိုင်သည်။" : "Use Refresh to try the Coinbase scan again."}</span></div> : null}
+    {data && data.items.length === 0 ? <div className="radar-empty"><strong>{lang === "my" ? `ယခု ${data.timeframe} scan တွင် golden cross ခါနီး setup မတွေ့ပါ` : `No approaching golden-cross setup in this ${data.timeframe} scan`}</strong><p>{lang === "my" ? `EMA50 က EMA200 အောက်တွင်ရှိ၊ gap ၂% အောက်နှင့် နောက်ဆုံး candle ၅ ခုအတွင်း ဆက်ကျဉ်းလာသည့် coin ကိုသာ ပြသည်။ ${data.skippedCount > 0 ? `Candle မလုံလောက်သည့် coin ${data.skippedCount} ခုကို ကျော်ခဲ့သည်။` : ""}` : `Only coins with EMA50 below EMA200, a gap under 2%, and a narrowing gap over the last five candles are shown.${data.skippedCount > 0 ? ` ${data.skippedCount} coins with insufficient candle data were skipped.` : ""}`}</p></div> : null}
+    {data && data.items.length > 0 ? <div className="ema-radar-list">{data.items.map((item) => <article key={item.productId} className="ema-radar-row">
+      <div className="radar-coin"><span>{item.symbol}</span><div><strong>{item.name}</strong><small>{formatCoinUsd(item.price)} · {data.timeframe}</small></div></div>
+      <div className="radar-label"><strong>{lang === "my" ? "Golden cross ခါနီး" : "Golden cross approaching"}</strong><span>{lang === "my" ? `${data.timeframe} bullish early warning` : `${data.timeframe} bullish early warning`}</span></div>
+      <dl className="radar-ema-values"><div><dt>EMA 50</dt><dd>{formatCoinUsd(item.ema50)}</dd></div><div><dt>EMA 100</dt><dd>{formatCoinUsd(item.ema100)}</dd></div><div><dt>EMA 200</dt><dd>{formatCoinUsd(item.ema200)}</dd></div></dl>
+      <div className="radar-gap"><div><span>{lang === "my" ? "လက်ရှိ gap" : "Current gap"}</span><strong>{item.gapPct.toFixed(3)}%</strong></div><div className="radar-gap-track" aria-label={`${item.symbol} EMA gap ${item.gapPct.toFixed(3)} percent`}><span style={{ width: `${Math.max(4, Math.min(100, (1 - item.gapPct / data.thresholdPct) * 100))}%` }} /></div><small>{lang === "my" ? `candle ၅ ခုအရင် ${item.gapFiveCandlesAgoPct.toFixed(3)}%` : `${item.gapFiveCandlesAgoPct.toFixed(3)}% five candles ago`} · {item.estimatedCandles === null ? (lang === "my" ? "ဆုံမည့်အချိန် ခန့်မှန်းမရ" : "cross timing uncertain") : (lang === "my" ? `လက်ရှိနှုန်းဖြင့် ~${item.estimatedCandles} × ${data.timeframe} candle · ${radarDuration(item.estimatedCandles, data.timeframe, lang)}` : `~${item.estimatedCandles} × ${data.timeframe} candles at current pace · ${radarDuration(item.estimatedCandles, data.timeframe, lang)}`)}</small></div>
+    </article>)}</div> : null}
+    <p className="radar-caution">{lang === "my" ? "Early warning သာဖြစ်သည် — EMA များ နီးကပ်လာပြီးနောက် ပြန်ကွာသွားနိုင်သဖြင့် cross ဖြစ်မည်ဟု အာမခံခြင်း မဟုတ်ပါ။ Timeframe တစ်ခုချင်းစီတွင် ၁၅ မိနစ် cache နှင့် ၅ မိနစ် manual-refresh debounce သီးခြားရှိသည်။ နေ့တိုင်း 08:52 တွင် timeframe သုံးခုလုံးကို အလိုအလျောက် scan လုပ်သည်။" : "Early warning only — converging EMAs can diverge again, so a cross is not guaranteed. Each timeframe has its own 15-minute cache and five-minute manual-refresh debounce. All three timeframes scan automatically each day at 08:52."}</p>
+  </section>;
+}
+
 function TradingSignals({ lang, settings, onSettingsChange }: { lang: Language; settings: Settings; onSettingsChange: (settings: Settings) => void }) {
   const queryClient = useQueryClient();
-  const [symbol, setSymbol] = useState<"BTC" | "ETH" | "SOL">("BTC");
+  const [symbol, setSymbol] = useState<TradingSignalSymbol>("BTC");
   const [timeframe, setTimeframe] = useState<"1H" | "4H" | "1D">("1D");
-  const query = useQuery({ queryKey: ["trading-signal", symbol], queryFn: () => api.getTradingSignal({ symbol }), staleTime: 15 * 60 * 1000 });
-  const refresh = useMutation({ mutationFn: () => api.refreshTradingSignal({ symbol }), onSuccess: async (next) => { queryClient.setQueryData(["trading-signal", symbol], next); onSettingsChange(await api.getSettings({})); } });
-  const result = refresh.data ?? query.data;
-  const data = result?.data ?? null;
+  const lastSuccessfulBySymbol = useRef<Partial<Record<TradingSignalSymbol, TradingSignal>>>({});
+  const [refreshingSymbols, setRefreshingSymbols] = useState<Set<TradingSignalSymbol>>(() => new Set());
+  const [refreshErrors, setRefreshErrors] = useState<Partial<Record<TradingSignalSymbol, true>>>({});
+  const query = useQuery({
+    queryKey: ["trading-signal", symbol],
+    queryFn: () => api.getTradingSignal({ symbol }),
+    staleTime: 15 * 60 * 1000,
+  });
+  const refresh = useMutation({
+    mutationFn: (targetSymbol: TradingSignalSymbol) => api.refreshTradingSignal({ symbol: targetSymbol }),
+    onMutate: (targetSymbol) => {
+      setRefreshingSymbols((current) => new Set(current).add(targetSymbol));
+      setRefreshErrors((current) => {
+        const next = { ...current };
+        delete next[targetSymbol];
+        return next;
+      });
+    },
+    onSuccess: async (next, targetSymbol) => {
+      queryClient.setQueryData(["trading-signal", targetSymbol], next);
+      try {
+        onSettingsChange(await api.getSettings({}));
+      } catch (_error) {
+        // The signal result is still valid when notification settings cannot refresh.
+      }
+    },
+    onError: (_error, targetSymbol) => setRefreshErrors((current) => ({ ...current, [targetSymbol]: true })),
+    onSettled: (_data, _error, targetSymbol) => setRefreshingSymbols((current) => {
+      const next = new Set(current);
+      next.delete(targetSymbol);
+      return next;
+    }),
+  });
+  const result = query.data;
+  useEffect(() => {
+    const fresh = result?.data;
+    if (fresh?.symbol !== symbol) return;
+    lastSuccessfulBySymbol.current[symbol] = fresh;
+    setRefreshErrors((current) => {
+      if (!current[symbol]) return current;
+      const next = { ...current };
+      delete next[symbol];
+      return next;
+    });
+  }, [result, symbol]);
+  const data = result?.data?.symbol === symbol ? result.data : (lastSuccessfulBySymbol.current[symbol] ?? null);
+  const isRefreshingSelected = refreshingSymbols.has(symbol);
+  const selectedRequestFailed = query.isError || result?.status === "error" || refreshErrors[symbol] === true;
   const signalLabel = (value: "buy" | "neutral" | "sell") => value === "buy" ? (lang === "my" ? "ဝယ်ဘက်" : "Buy") : value === "sell" ? (lang === "my" ? "ရောင်းဘက်" : "Sell") : (lang === "my" ? "တည်ငြိမ်" : "Neutral");
   const verdictLabel = (value: "strong_buy" | "buy" | "neutral" | "sell" | "strong_sell") => ({ strong_buy: lang === "my" ? "အားကောင်းသော ဝယ်ဘက်" : "Strong buy", buy: lang === "my" ? "ဝယ်ဘက်" : "Buy", neutral: lang === "my" ? "တည်ငြိမ်" : "Neutral", sell: lang === "my" ? "ရောင်းဘက်" : "Sell", strong_sell: lang === "my" ? "အားကောင်းသော ရောင်းဘက်" : "Strong sell" }[value]);
+  const signalHeader = <header className="trading-hero"><div><p className="eyebrow">TECHNICAL + AI</p><h1>{lang === "my" ? "Trading အချက်ပြများ" : "Trading Signals"}</h1><p>{lang === "my" ? "1H၊ 4H၊ 1D RSI၊ MACD၊ moving-average crossover နှင့် စျေးနှုန်း၊ သတင်း၊ on-chain context ကိုပေါင်းစပ်ထားသည်။" : "1H, 4H, and 1D RSI, MACD, and moving-average signals combined with price, news, and on-chain context."}</p></div><div className="signal-asset-picker" aria-label="Signal asset">{(["BTC", "ETH", "SOL"] as const).map((item) => <button key={item} onClick={() => setSymbol(item)} aria-pressed={symbol === item}>{item}</button>)}</div></header>;
+  const retrySelectedSignal = () => {
+    setRefreshErrors((current) => {
+      const next = { ...current };
+      delete next[symbol];
+      return next;
+    });
+    void query.refetch();
+  };
   const dismissSignalEvent = useMutation({ mutationFn: (id: number) => api.dismissTradingSignalEvent({ id }), onSuccess: onSettingsChange });
   useEffect(() => {
     if (!settings.notifications.signalAlerts || typeof Notification === "undefined" || Notification.permission !== "granted") return;
@@ -990,13 +1199,14 @@ function TradingSignals({ lang, settings, onSettingsChange }: { lang: Language; 
       try {
         const key = `crypto-signal-alert-${event.id}`;
         if (window.localStorage.getItem(key)) continue;
-        new Notification(`${event.symbol} · ${verdictLabel(event.newVerdict as "strong_buy" | "buy" | "neutral" | "sell" | "strong_sell")}`, { body: `${event.previousVerdict.replaceAll("_", " ")} → ${event.newVerdict.replaceAll("_", " ")} · ${event.confidence}%` });
+        const eventTitle = event.newVerdict === "golden_cross_approaching" ? (lang === "my" ? "Golden cross ခါနီး" : "Golden cross approaching") : verdictLabel(event.newVerdict as "strong_buy" | "buy" | "neutral" | "sell" | "strong_sell");
+        new Notification(`${event.symbol} · ${eventTitle}`, { body: event.newVerdict === "golden_cross_approaching" ? (lang === "my" ? `EMA50 / EMA200 နီးကပ်မှု score ${event.confidence}%` : `EMA50 / EMA200 proximity score ${event.confidence}%`) : `${event.previousVerdict.replaceAll("_", " ")} → ${event.newVerdict.replaceAll("_", " ")} · ${event.confidence}%` });
         window.localStorage.setItem(key, "shown");
       } catch { /* Alert remains visible in-app. */ }
     }
   }, [lang, settings.notifications.signalAlerts, settings.signalEvents]);
-  if (query.isPending && !data) return <section className="update-state" aria-live="polite"><div className="loader" /><p>{lang === "my" ? "Trading signal တွက်ချက်နေသည်…" : "Calculating trading signals…"}</p></section>;
-  if (!data) return <section className="update-state"><p className="eyebrow">TRADING SIGNALS</p><h1>{lang === "my" ? "Signal မရနိုင်သေးပါ" : "Trading signal is unavailable"}</h1><button className="primary-button" onClick={() => void query.refetch()}>{copy[lang].retry}</button></section>;
+  if (query.isPending && !data) return <div className="trading-page">{signalHeader}<section className="update-state" aria-live="polite"><div className="loader" /><p>{lang === "my" ? `${symbol} trading signal တွက်ချက်နေသည်…` : `Calculating the ${symbol} trading signal…`}</p></section><section className="feature-section" aria-hidden="true"><div className="skeleton signal-skeleton-line" /><div className="skeleton signal-skeleton-line short" /><div className="skeleton signal-skeleton-line" /></section><EmaCrossRadar lang={lang} onSettingsChange={onSettingsChange} /></div>;
+  if (!data) return <div className="trading-page">{signalHeader}<section className="update-state" role="alert"><p className="eyebrow">TRADING SIGNALS · {symbol}</p><h1>{lang === "my" ? `${symbol} signal မရနိုင်သေးပါ` : `${symbol} trading signal is unavailable`}</h1><p>{lang === "my" ? "အခြား coin ၏ signal ကို အစားထိုးမပြထားပါ။ ဒီ coin ကိုသာ ပြန်ယူနိုင်သည်။" : "No other asset is substituted. Retry this asset when the source is available."}</p><button className="primary-button" type="button" onClick={retrySelectedSignal}>{copy[lang].retry}</button></section><EmaCrossRadar lang={lang} onSettingsChange={onSettingsChange} /></div>;
   const selectedTimeframe = data.timeframes ? timeframe === "1H" ? data.timeframes.oneHour : timeframe === "4H" ? data.timeframes.fourHour : data.timeframes.oneDay : null;
   const selectedIndicators = selectedTimeframe?.indicators ?? data.indicators;
   const indicators = [
@@ -1004,7 +1214,7 @@ function TradingSignals({ lang, settings, onSettingsChange }: { lang: Language; 
     { name: "MACD (12, 26, 9)", detail: `MACD ${selectedIndicators.macd.macd.toFixed(3)} · Signal ${selectedIndicators.macd.signalLine.toFixed(3)} · Hist ${selectedIndicators.macd.histogram.toFixed(3)}`, value: selectedIndicators.macd.histogram.toFixed(3), signal: selectedIndicators.macd.signal },
     { name: "SMA crossover", detail: `SMA20 ${fullUsd.format(selectedIndicators.movingAverage.fast)} · SMA50 ${fullUsd.format(selectedIndicators.movingAverage.slow)}`, value: selectedIndicators.movingAverage.fast > selectedIndicators.movingAverage.slow ? "20 > 50" : "20 ≤ 50", signal: selectedIndicators.movingAverage.signal },
   ];
-  return <div className="trading-page"><header className="trading-hero"><div><p className="eyebrow">TECHNICAL + AI</p><h1>{lang === "my" ? "Trading အချက်ပြများ" : "Trading Signals"}</h1><p>{lang === "my" ? "1H၊ 4H၊ 1D RSI၊ MACD၊ moving-average crossover နှင့် စျေးနှုန်း၊ သတင်း၊ on-chain context ကိုပေါင်းစပ်ထားသည်။" : "1H, 4H, and 1D RSI, MACD, and moving-average signals combined with price, news, and on-chain context."}</p></div><div className="signal-asset-picker" aria-label="Signal asset">{(["BTC", "ETH", "SOL"] as const).map((item) => <button key={item} onClick={() => setSymbol(item)} aria-pressed={symbol === item}>{item}</button>)}</div></header><div className="signal-toolbar"><p>{copy[lang].updated} · {formatTime(data.generatedAt, lang)} · Market {formatTime(data.marketAsOf, lang)}</p><button className="refresh-button" onClick={() => refresh.mutate()} disabled={refresh.isPending}>{refresh.isPending ? copy[lang].refreshing : copy[lang].refresh}</button></div>{result?.status === "stale" ? <div className="status-banner">{lang === "my" ? result.message : result.messageEn}</div> : null}{settings.signalEvents.length > 0 ? <section className="signal-alert-list" aria-label={lang === "my" ? "Signal ပြောင်းလဲမှုများ" : "Signal changes"}>{settings.signalEvents.map((event) => <article key={event.id} role="status"><div><strong>{event.symbol} · {event.previousVerdict.replaceAll("_", " ")} → {event.newVerdict.replaceAll("_", " ")}</strong><span>{lang === "my" ? `ယုံကြည်မှု ${event.confidence}% · ${formatTime(event.triggeredAt, lang)}` : `Confidence ${event.confidence}% · ${formatTime(event.triggeredAt, lang)}`}</span></div><button onClick={() => dismissSignalEvent.mutate(event.id)}>{lang === "my" ? "ပိတ်မည်" : "Dismiss"}</button></article>)}</section> : null}<section className={`signal-verdict verdict-${data.verdict}`}><div className="verdict-mark"><span>{data.symbol} · {data.name}</span><strong>{verdictLabel(data.verdict)}</strong><small>{sentimentForScore(data.aiScore)} · AI {data.aiScore}/100</small></div><div className="verdict-price"><span>{lang === "my" ? "စျေးနှုန်း" : "Price"}</span><strong>{fullUsd.format(data.price)}</strong><Change value={data.changePct} /></div><div className="signal-score-track" aria-label={`AI score ${data.aiScore} out of 100`}><span style={{ width: `${data.aiScore}%` }} /></div><div className="signal-score-labels"><span>Sell</span><strong>{lang === "my" ? `ယုံကြည်မှု ${data.confidence}%` : `Confidence ${data.confidence}%`}</strong><span>Buy</span></div></section><div className="signal-detail-grid"><section className="feature-section"><div className="section-heading"><div><p className="eyebrow">TECHNICALS</p><h2>{lang === "my" ? "Indicator အချက်ပြများ" : "Indicator signals"}</h2></div><span className="technical-score">{selectedTimeframe?.technicalScore ?? data.technicalScore}/100</span></div>{data.timeframes ? <div className="timeframe-switch" role="group" aria-label={lang === "my" ? "Signal အချိန်ကာလ" : "Signal timeframe"}>{(["1H", "4H", "1D"] as const).map((item) => { const frame = item === "1H" ? data.timeframes?.oneHour : item === "4H" ? data.timeframes?.fourHour : data.timeframes?.oneDay; return <button key={item} aria-pressed={timeframe === item} onClick={() => setTimeframe(item)}><strong>{item}</strong><span className={`indicator-${frame?.verdict ?? "neutral"}`}>{frame ? signalLabel(frame.verdict) : "—"}</span></button>; })}</div> : <p className="form-note">{lang === "my" ? "Cached signal အဟောင်းတွင် 1D data သာရှိသည်။ Refresh လုပ်ပြီး multi-timeframe data ယူပါ။" : "This saved signal contains daily data only. Refresh for multi-timeframe analysis."}</p>}<div className="indicator-list">{indicators.map((item) => <article key={item.name}><div><strong>{item.name}</strong><span>{item.detail}</span></div><b>{item.value}</b><em className={`indicator-${item.signal}`}>{signalLabel(item.signal)}</em></article>)}</div></section><section className="feature-section"><p className="eyebrow">CONTEXT</p><h2>{lang === "my" ? "AI ထည့်သွင်းချက်များ" : "AI inputs"}</h2><div className="signal-input-list"><article><span>News sentiment</span><strong>{data.news.score ?? "—"}</strong><small>{data.news.total} stories</small></article><article><span>On-chain</span><strong>{data.onChain.score ?? "—"}</strong><small>{localized({ mm: data.onChain.detailMm, en: data.onChain.detailEn }, lang)}</small></article></div></section></div><section className="signal-analysis"><p className="eyebrow">ASSESSMENT</p><h2>{lang === "my" ? "AI သုံးသပ်ချက်" : "AI assessment"}</h2><p>{localized(data.rationale, lang)}</p><div><strong>{lang === "my" ? "သတိပြုရန်" : "Caution"}</strong><p>{localized(data.caution, lang)}</p></div></section><p className="signal-method-note">{lang === "my" ? "Signal များသည် အချက်အလက်ဆိုင်ရာ သုံးသပ်ချက်သာဖြစ်ပြီး ရင်းနှီးမြှုပ်နှံမှုအကြံပြုချက် မဟုတ်ပါ။" : "Signals are informational analysis, not investment advice."} · {data.sources.join(" · ")}</p></div>;
+  return <div className="trading-page">{signalHeader}<div className="signal-toolbar"><p>{copy[lang].updated} · {formatTime(data.generatedAt, lang)} · Market {formatTime(data.marketAsOf, lang)}</p><button className="refresh-button" onClick={() => refresh.mutate(symbol)} disabled={isRefreshingSelected}>{isRefreshingSelected ? copy[lang].refreshing : copy[lang].refresh}</button></div>{(query.isFetching || isRefreshingSelected) ? <div className="status-banner" role="status">{lang === "my" ? `${symbol} signal အသစ်ကို ရယူနေသည် — နောက်ဆုံး ${symbol} signal ကို ဆက်ပြထားသည်။` : `Refreshing ${symbol} — its latest successful signal remains visible.`}</div> : null}{selectedRequestFailed ? <div className="status-banner" role="alert">{lang === "my" ? `${symbol} signal အသစ်ကို ယခုမရသေးပါ။ နောက်ဆုံးအောင်မြင်သော ${symbol} signal ကို ဆက်ပြထားသည်။` : `The latest ${symbol} request failed. Showing the most recent successful ${symbol} signal.`}</div> : result?.status === "stale" ? <div className="status-banner">{lang === "my" ? result.message : result.messageEn}</div> : null}{settings.signalEvents.length > 0 ? <section className="signal-alert-list" aria-label={lang === "my" ? "Signal ပြောင်းလဲမှုများ" : "Signal changes"}>{settings.signalEvents.map((event) => <article key={event.id} role="status"><div><strong>{event.symbol} · {event.previousVerdict.replaceAll("_", " ")} → {event.newVerdict.replaceAll("_", " ")}</strong><span>{lang === "my" ? `ယုံကြည်မှု ${event.confidence}% · ${formatTime(event.triggeredAt, lang)}` : `Confidence ${event.confidence}% · ${formatTime(event.triggeredAt, lang)}`}</span></div><button onClick={() => dismissSignalEvent.mutate(event.id)}>{lang === "my" ? "ပိတ်မည်" : "Dismiss"}</button></article>)}</section> : null}<section className={`signal-verdict verdict-${data.verdict}`}><div className="verdict-mark"><span>{data.symbol} · {data.name}</span><strong>{verdictLabel(data.verdict)}</strong><small>{sentimentForScore(data.aiScore)} · AI {data.aiScore}/100</small></div><div className="verdict-price"><span>{lang === "my" ? "စျေးနှုန်း" : "Price"}</span><strong>{fullUsd.format(data.price)}</strong><Change value={data.changePct} /></div><div className="signal-score-track" aria-label={`AI score ${data.aiScore} out of 100`}><span style={{ width: `${data.aiScore}%` }} /></div><div className="signal-score-labels"><span>Sell</span><strong>{lang === "my" ? `ယုံကြည်မှု ${data.confidence}%` : `Confidence ${data.confidence}%`}</strong><span>Buy</span></div></section><div className="signal-detail-grid"><section className="feature-section"><div className="section-heading"><div><p className="eyebrow">TECHNICALS</p><h2>{lang === "my" ? "Indicator အချက်ပြများ" : "Indicator signals"}</h2></div><span className="technical-score">{selectedTimeframe?.technicalScore ?? data.technicalScore}/100</span></div>{data.timeframes ? <div className="timeframe-switch" role="group" aria-label={lang === "my" ? "Signal အချိန်ကာလ" : "Signal timeframe"}>{(["1H", "4H", "1D"] as const).map((item) => { const frame = item === "1H" ? data.timeframes?.oneHour : item === "4H" ? data.timeframes?.fourHour : data.timeframes?.oneDay; return <button key={item} aria-pressed={timeframe === item} onClick={() => setTimeframe(item)}><strong>{item}</strong><span className={`indicator-${frame?.verdict ?? "neutral"}`}>{frame ? signalLabel(frame.verdict) : "—"}</span></button>; })}</div> : <p className="form-note">{lang === "my" ? "Cached signal အဟောင်းတွင် 1D data သာရှိသည်။ Refresh လုပ်ပြီး multi-timeframe data ယူပါ။" : "This saved signal contains daily data only. Refresh for multi-timeframe analysis."}</p>}<div className="indicator-list">{indicators.map((item) => <article key={item.name}><div><strong>{item.name}</strong><span>{item.detail}</span></div><b>{item.value}</b><em className={`indicator-${item.signal}`}>{signalLabel(item.signal)}</em></article>)}</div></section><section className="feature-section"><p className="eyebrow">CONTEXT</p><h2>{lang === "my" ? "AI ထည့်သွင်းချက်များ" : "AI inputs"}</h2><div className="signal-input-list"><article><span>News sentiment</span><strong>{data.news.score ?? "—"}</strong><small>{data.news.total} stories</small></article><article><span>On-chain</span><strong>{data.onChain.score ?? "—"}</strong><small>{localized({ mm: data.onChain.detailMm, en: data.onChain.detailEn }, lang)}</small></article></div></section></div><EmaCrossRadar lang={lang} onSettingsChange={onSettingsChange} /><section className="signal-analysis"><p className="eyebrow">ASSESSMENT</p><h2>{lang === "my" ? "AI သုံးသပ်ချက်" : "AI assessment"}</h2><p>{localized(data.rationale, lang)}</p><div><strong>{lang === "my" ? "သတိပြုရန်" : "Caution"}</strong><p>{localized(data.caution, lang)}</p></div></section><p className="signal-method-note">{lang === "my" ? "Signal များသည် အချက်အလက်ဆိုင်ရာ သုံးသပ်ချက်သာဖြစ်ပြီး ရင်းနှီးမြှုပ်နှံမှုအကြံပြုချက် မဟုတ်ပါ။" : "Signals are informational analysis, not investment advice."} · {data.sources.join(" · ")}</p></div>;
 }
 
 function WeeklyDigest({ lang, notificationsEnabled }: { lang: Language; notificationsEnabled: boolean }) {
@@ -1028,7 +1238,7 @@ function WeeklyDigest({ lang, notificationsEnabled }: { lang: Language; notifica
 }
 
 
-function DcaCalculator({ data, lang }: { data: Dashboard; lang: Language }) {
+function DcaPlanner({ data, lang }: { data: Dashboard; lang: Language }) {
   const t = copy[lang];
   const [amount, setAmount] = useState("100");
   const [frequency, setFrequency] = useState<"daily" | "weekly">("weekly");
@@ -1047,162 +1257,261 @@ function DcaCalculator({ data, lang }: { data: Dashboard; lang: Language }) {
   return <div className="dca-page"><div className="dca-layout"><section className="feature-section" aria-labelledby="dca-heading"><p className="eyebrow">BTC DCA</p><h1 id="dca-heading">{t.dcaTitle}</h1><p className="section-description">{t.dcaDescription}</p><div className="dca-form"><label>{t.amount}<input inputMode="decimal" value={amount} onChange={(event) => setAmount(event.target.value)} aria-label={t.amount} /></label><label>{t.frequency}<select value={frequency} onChange={(event) => setFrequency(event.target.value === "daily" ? "daily" : "weekly")}><option value="daily">{t.daily}</option><option value="weekly">{t.weekly}</option></select></label><label>{t.purchases}<input type="number" min="1" max={Math.max(maxPurchases, 1)} value={purchases} onChange={(event) => setPurchases(event.target.value)} aria-label={t.purchases} /></label></div><p className="form-note">{t.dcaLimit(maxPurchases)}</p></section><section className="dca-result" aria-live="polite">{result ? <><div className="dca-result-head"><span>{result.oldestDate ? formatDay(result.oldestDate, lang) : ""} {t.from}</span><strong>{t.times(result.actualPurchases)}</strong></div><div className="dca-hero"><span>{t.currentValue}</span><strong>{fullUsd.format(result.currentValue)}</strong><Change value={result.invested === 0 ? 0 : (result.pnl / result.invested) * 100} /></div><dl><div><dt>{t.invested}</dt><dd>{fullUsd.format(result.invested)}</dd></div><div><dt>{t.btcReceived}</dt><dd>{compactNumber.format(result.units)} BTC</dd></div><div><dt>{t.pnl}</dt><dd className={result.pnl >= 0 ? "change-positive" : "change-negative"}>{result.pnl >= 0 ? "+" : ""}{fullUsd.format(result.pnl)}</dd></div><div><dt>{t.currentBtc}</dt><dd>{fullUsd.format(btc?.price ?? 0)}</dd></div></dl></> : <div className="empty-panel"><strong>{t.invalidAmount}</strong></div>}</section></div><section className="allocation-guide" aria-labelledby="allocation-heading"><div className="allocation-head"><div><p className="eyebrow">LONG-TERM ALLOCATION</p><h2 id="allocation-heading">{lang === "my" ? "BTC / ETH / SOL DCA လမ်းညွှန်" : "BTC / ETH / SOL DCA guide"}</h2><p>{lang === "my" ? "အပေါ်က DCA ပမာဏနှင့် frequency မှ တစ်လစာခန့်မှန်းငွေကို profile အလိုက် ခွဲပြထားသည်။" : "Splits the estimated monthly amount from the DCA settings above across a long-term profile."}</p></div><strong>{fullUsd.format(monthlyDca)}<small> / {lang === "my" ? "လ" : "month"}</small></strong></div><div className="allocation-profile-switch" role="group" aria-label={lang === "my" ? "Allocation profile" : "Allocation profile"}>{(Object.keys(profiles) as Array<keyof typeof profiles>).map((key) => <button type="button" key={key} aria-pressed={allocationProfile === key} onClick={() => setAllocationProfile(key)}><strong>{lang === "my" ? profiles[key].labelMy : profiles[key].labelEn}</strong><span>{profiles[key].btc}/{profiles[key].eth}/{profiles[key].sol}</span></button>)}</div><div className="allocation-bars"><article><div><strong>BTC</strong><span>{allocation.btc}% · {fullUsd.format(monthlyDca * allocation.btc / 100)}</span></div><progress max="100" value={allocation.btc} /></article><article><div><strong>ETH</strong><span>{allocation.eth}% · {fullUsd.format(monthlyDca * allocation.eth / 100)}</span></div><progress max="100" value={allocation.eth} /></article><article><div><strong>SOL</strong><span>{allocation.sol}% · {fullUsd.format(monthlyDca * allocation.sol / 100)}</span></div><progress max="100" value={allocation.sol} /></article></div><div className="allocation-notes"><p>{lang === "my" ? "BTC သည် core allocation၊ ETH သည် smart-contract exposure၊ SOL သည် volatility ပိုမြင့်သော satellite allocation အဖြစ် သတ်မှတ်ထားသည်။" : "BTC anchors the core, ETH adds smart-contract exposure, and SOL is the higher-volatility satellite allocation."}</p><p>{lang === "my" ? "၆ လမှ ၁၂ လတစ်ကြိမ် သို့မဟုတ် allocation ၅ percentage points ကျော်လွဲချိန်တွင် ပြန်ညှိစဉ်းစားပါ။" : "Consider reviewing every 6–12 months, or when an allocation drifts by more than 5 percentage points."}</p></div><p className="signal-method-note">{lang === "my" ? "ပညာရေးဆိုင်ရာ model သာဖြစ်ပြီး ကိုယ်ပိုင်ရင်းနှီးမြှုပ်နှံမှုအကြံပြုချက် မဟုတ်ပါ။" : "This is an educational model, not personalized investment advice."}</p></section></div>;
 }
 
-function SocialTrends({ data, lang }: { data: Dashboard; lang: Language }) {
-  const coins = data.trendingCoins;
-  return (
-    <section className="feature-section" aria-labelledby="social-trends-heading">
-      <div className="section-heading">
-        <div><p className="eyebrow">SOCIAL TRENDS</p><h2 id="social-trends-heading">{lang === "my" ? "Social Trends" : "Social trends"}</h2></div>
-        <span className="history-count">CoinGecko</span>
-      </div>
-      <p className="section-description">{lang === "my" ? "CoinGecko တွင် ယခုအချိန် ရှာဖွေမှုအများဆုံး coin များ။" : "The most-searched coins on CoinGecko right now."}</p>
-      {coins.length > 0 ? <div className="trend-coin-list">{coins.map((coin) => <article key={coin.symbol} className="trend-coin-row"><span className="coin-mark" aria-hidden="true">{coin.symbol.slice(0, 3)}</span><div><strong>{coin.symbol}</strong><span>{coin.name}{coin.marketCapRank ? ` · #${coin.marketCapRank}` : ""}</span></div><div className="trend-coin-right"><b className={coin.priceChangePct24h === null ? "" : coin.priceChangePct24h >= 0 ? "change-positive" : "change-negative"}>{coin.priceChangePct24h === null ? "—" : `${coin.priceChangePct24h >= 0 ? "+" : ""}${coin.priceChangePct24h.toFixed(2)}%`}</b><span>{coin.priceUsd === null ? "—" : fullUsd.format(coin.priceUsd)}</span></div></article>)}</div> : <div className="empty-panel"><strong>{lang === "my" ? "Trending coin မရနိုင်သေးပါ" : "Trending coins are unavailable"}</strong><span>{lang === "my" ? "Refresh လုပ်၍ ပြန်စစ်နိုင်သည်။" : "Refresh to try again."}</span></div>}
-    </section>
-  );
-}
 
-function HotDiscussions({ data, lang }: { data: Dashboard; lang: Language }) {
-  const discussions = data.news.filter((item) => item.source === "r/CryptoCurrency").slice(0, 6);
-  return (
-    <section className="feature-section" aria-labelledby="hot-discussions-heading">
-      <div className="section-heading">
-        <div><p className="eyebrow">REDDIT</p><h2 id="hot-discussions-heading">{lang === "my" ? "Hot Discussions" : "Hot discussions"}</h2></div>
-        <span className="history-count">r/CryptoCurrency</span>
-      </div>
-      <p className="section-description">{lang === "my" ? "r/CryptoCurrency မှ လတ်တလော ဆွေးနွေးမှုများ။ Reddit က engagement (upvote/comment) data ကို တိုက်ရိုက်မပေးသဖြင့် မပြထားပါ။" : "Recent r/CryptoCurrency discussions. Engagement figures are not shown because Reddit does not expose them directly."}</p>
-      {discussions.length > 0 ? <div className="news-list">{discussions.map((item, index) => <article className="news-row" key={`${item.headline}-${index}`}><div className={`sentiment-dot sentiment-${item.sentiment}`} aria-label={item.sentiment} /><div>{item.url ? <a href={item.url} target="_blank" rel="noreferrer">{item.headline}</a> : <strong>{item.headline}</strong>}<p>{lang === "my" ? item.summaryMm ?? item.summaryEn : item.summaryEn}</p><span>{item.source}{item.publishedAt ? ` · ${formatTime(item.publishedAt, lang)}` : ""}</span></div></article>)}</div> : <div className="empty-panel"><strong>{lang === "my" ? "ဆွေးနွေးမှု မတွေ့သေးပါ" : "No discussions found yet"}</strong><span>{lang === "my" ? "News refresh လုပ်ပြီးမှ r/CryptoCurrency သတင်းများ ပေါ်လာမည်။" : "r/CryptoCurrency stories appear after a news refresh."}</span></div>}
-    </section>
-  );
+type PositionDirection = "long" | "short";
+type BacktestRange = "1y" | "3y" | "all";
+
+type BacktestTrade = {
+  entryDate: string;
+  entryPrice: number;
+  exitDate: string | null;
+  exitPrice: number;
+  pnl: number;
+  returnPct: number;
+  open: boolean;
+};
+
+function NumericField({ label, value, onChange, min, max, step = "any", suffix }: { label: string; value: string; onChange: (value: string) => void; min?: number; max?: number; step?: string; suffix?: string }) {
+  return <label className="tool-field"><span>{label}</span><div><input type="number" inputMode="decimal" min={min} max={max} step={step} value={value} onChange={(event) => onChange(event.target.value)} aria-label={label} />{suffix ? <b>{suffix}</b> : null}</div></label>;
 }
 
 function PositionCalculator({ data, lang }: { data: Dashboard; lang: Language }) {
-  const [symbol, setSymbol] = useState<"BTC" | "ETH" | "SOL">("BTC");
-  const [side, setSide] = useState<"long" | "short">("long");
+  const [symbol, setSymbol] = useState("BTC");
+  const [direction, setDirection] = useState<PositionDirection>("long");
+  const selectedQuote = data.quotes.find((quote) => quote.symbol === symbol) ?? data.quotes[0];
   const [equity, setEquity] = useState("10000");
   const [riskPct, setRiskPct] = useState("1");
-  const [leverage, setLeverage] = useState("5");
-  const quote = data.quotes.find((item) => item.symbol === symbol);
-  const result = useMemo(() => {
-    const eq = Number(equity);
-    const risk = Number(riskPct);
-    const lev = Number(leverage);
-    if (!quote || !Number.isFinite(eq) || eq <= 0 || !Number.isFinite(risk) || risk <= 0 || !Number.isFinite(lev) || lev <= 0) return null;
-    const riskBudget = eq * (risk / 100);
-    const notional = riskBudget * lev;
-    const size = notional / quote.price;
-    const liqPrice = side === "long" ? quote.price * (1 - 1 / lev) : quote.price * (1 + 1 / lev);
-    return { riskBudget, notional, size, liqPrice, entry: quote.price };
-  }, [symbol, side, equity, riskPct, leverage, quote]);
-  return (
-    <div className="dca-page">
-      <div className="dca-layout">
-        <section className="feature-section" aria-labelledby="position-heading">
-          <p className="eyebrow">POSITION SIZING</p>
-          <h1 id="position-heading">{lang === "my" ? "Position တွက်မည်" : "Position calculator"}</h1>
-          <p className="section-description">{lang === "my" ? "Risk % မှ position size နှင့် liquidation ခန့်မှန်းဈေးကို တွက်ချက်သည်။" : "Sizes a position from your risk budget and estimates the liquidation price."}</p>
-          <div className="position-coin-picker" role="group" aria-label={lang === "my" ? "Coin ရွေးရန်" : "Choose a coin"}>
-            {(["BTC", "ETH", "SOL"] as const).map((item) => <button key={item} type="button" aria-pressed={symbol === item} onClick={() => setSymbol(item)}>{item}</button>)}
-          </div>
-          <div className="position-side-switch" role="group" aria-label={lang === "my" ? "Long / Short" : "Long / Short"}>
-            {(["long", "short"] as const).map((item) => <button key={item} type="button" aria-pressed={side === item} onClick={() => setSide(item)}>{item === "long" ? (lang === "my" ? "Long" : "Long") : (lang === "my" ? "Short" : "Short")}</button>)}
-          </div>
-          <div className="dca-form">
-            <label>{lang === "my" ? "Equity (USD)" : "Equity (USD)"}<input inputMode="decimal" value={equity} onChange={(event) => setEquity(event.target.value)} aria-label={lang === "my" ? "Equity" : "Equity"} /></label>
-            <label>{lang === "my" ? "Risk %" : "Risk %"}<input inputMode="decimal" value={riskPct} onChange={(event) => setRiskPct(event.target.value)} aria-label={lang === "my" ? "Risk percent" : "Risk percent"} /></label>
-            <label>{lang === "my" ? "Leverage" : "Leverage"}<input inputMode="decimal" value={leverage} onChange={(event) => setLeverage(event.target.value)} aria-label={lang === "my" ? "Leverage" : "Leverage"} /></label>
-          </div>
-          <p className="form-note">{lang === "my" ? "Liquidation ဈေးသည် funding နှင့် maintenance margin မပါသော ခန့်မှန်းချက်သာ ဖြစ်သည်။" : "The liquidation price is an estimate only — it excludes funding and maintenance margin."}</p>
-        </section>
-        <section className="dca-result" aria-live="polite" aria-label={lang === "my" ? "တွက်ချက်မှုရလဒ်" : "Calculation result"}>
-          {result ? <>
-            <div className="dca-result-head"><span>{symbol} · {side === "long" ? (lang === "my" ? "Long" : "Long") : (lang === "my" ? "Short" : "Short")} · {leverage}x</span><strong>{fullUsd.format(result.entry)}</strong></div>
-            <div className="dca-hero"><span>{lang === "my" ? "Position size" : "Position size"}</span><strong>{fullUsd.format(result.notional)}</strong><span>{compactNumber.format(result.size)} {symbol}</span></div>
-            <dl>
-              <div><dt>{lang === "my" ? "Risk budget" : "Risk budget"}</dt><dd>{fullUsd.format(result.riskBudget)}</dd></div>
-              <div><dt>{lang === "my" ? "Entry ဈေး" : "Entry price"}</dt><dd>{fullUsd.format(result.entry)}</dd></div>
-              <div><dt>{lang === "my" ? "Liquidation ခန့်မှန်း" : "Est. liquidation"}</dt><dd className="change-negative">{fullUsd.format(result.liqPrice)}</dd></div>
-            </dl>
-          </> : <div className="empty-panel"><strong>{lang === "my" ? "မှန်ကန်သော တန်ဖိုးများ ထည့်ပါ" : "Enter valid values"}</strong><span>{lang === "my" ? "Equity၊ risk % နှင့် leverage တို့သည် သုညထက် ကြီးရမည်။" : "Equity, risk %, and leverage must be greater than zero."}</span></div>}
-        </section>
-      </div>
-      <p className="signal-method-note">{lang === "my" ? "ပညာရေးဆိုင်ရာ တွက်ချက်မှုသာ ဖြစ်ပြီး ရင်းနှီးမြှုပ်နှံမှုအကြံပြုချက် မဟုတ်ပါ။" : "This is an educational calculation, not investment advice."}</p>
-    </div>
-  );
-}
+  const [entry, setEntry] = useState(() => String(selectedQuote?.price ?? 0));
+  const [stop, setStop] = useState(() => String((selectedQuote?.price ?? 0) * 0.97));
+  const [target, setTarget] = useState(() => String((selectedQuote?.price ?? 0) * 1.06));
+  const [leverage, setLeverage] = useState("1");
 
-function BacktestTool({ lang }: { lang: Language }) {
-  const [capital, setCapital] = useState("10000");
-  const [commissionPct, setCommissionPct] = useState("0.1");
-  const [ddLimitPct, setDdLimitPct] = useState("20");
-  const [trades, setTrades] = useState<number[]>([]);
-  const [draft, setDraft] = useState("");
-  const addTrade = () => {
-    const value = Number(draft);
-    if (!Number.isFinite(value) || value === 0) return;
-    setTrades((prev) => [...prev, value]);
-    setDraft("");
+  const chooseSymbol = (next: string) => {
+    setSymbol(next);
+    const quote = data.quotes.find((item) => item.symbol === next);
+    if (!quote) return;
+    setEntry(String(Number(quote.price.toPrecision(8))));
+    setStop(String(Number((quote.price * (direction === "long" ? .97 : 1.03)).toPrecision(8))));
+    setTarget(String(Number((quote.price * (direction === "long" ? 1.06 : .94)).toPrecision(8))));
+  };
+  const chooseDirection = (next: PositionDirection) => {
+    setDirection(next);
+    const entryValue = Number(entry);
+    if (Number.isFinite(entryValue) && entryValue > 0) {
+      setStop(String(Number((entryValue * (next === "long" ? .97 : 1.03)).toPrecision(8))));
+      setTarget(String(Number((entryValue * (next === "long" ? 1.06 : .94)).toPrecision(8))));
+    }
   };
   const result = useMemo(() => {
-    const start = Number(capital);
-    const comm = Number(commissionPct);
-    const ddLimit = Number(ddLimitPct);
-    if (!Number.isFinite(start) || start <= 0 || trades.length === 0) return null;
-    const commissionRate = Number.isFinite(comm) && comm >= 0 ? comm / 100 : 0;
-    let equity = start;
-    let peak = start;
-    let maxDd = 0;
-    let wins = 0;
-    let grossProfit = 0;
-    let grossLoss = 0;
-    const curve = [{ trade: 0, equity: start }];
-    trades.forEach((pnl, index) => {
-      const net = pnl - Math.abs(pnl) * commissionRate;
-      equity += net;
-      if (net > 0) { wins += 1; grossProfit += net; } else { grossLoss += Math.abs(net); }
-      if (equity > peak) peak = equity;
-      const dd = peak === 0 ? 0 : ((peak - equity) / peak) * 100;
-      if (dd > maxDd) maxDd = dd;
-      curve.push({ trade: index + 1, equity });
-    });
-    const winRate = (wins / trades.length) * 100;
-    const profitFactor = grossLoss === 0 ? (grossProfit > 0 ? Number.POSITIVE_INFINITY : 0) : grossProfit / grossLoss;
-    const ddBreached = Number.isFinite(ddLimit) && ddLimit > 0 && maxDd > ddLimit;
-    return { curve, winRate, profitFactor, maxDd, ddBreached, finalEquity: equity, start };
-  }, [capital, commissionPct, ddLimitPct, trades]);
-  return (
-    <div className="dca-page">
-      <div className="dca-layout">
-        <section className="feature-section" aria-labelledby="backtest-heading">
-          <p className="eyebrow">STRATEGY BACKTEST</p>
-          <h1 id="backtest-heading">Backtest</h1>
-          <p className="section-description">{lang === "my" ? "Trade တစ်ခုချင်းစီရဲ့ အမြတ်/အရှုံး (USD) ကို ထည့်ပြီး strategy ကို စမ်းသပ်ပါ။" : "Enter each trade's profit or loss (USD) to test a strategy."}</p>
-          <div className="dca-form">
-            <label>{lang === "my" ? "မတည်ငွေ (USD)" : "Starting capital (USD)"}<input inputMode="decimal" value={capital} onChange={(event) => setCapital(event.target.value)} aria-label={lang === "my" ? "Starting capital" : "Starting capital"} /></label>
-            <label>{lang === "my" ? "Commission % / trade" : "Commission % / trade"}<input inputMode="decimal" value={commissionPct} onChange={(event) => setCommissionPct(event.target.value)} aria-label={lang === "my" ? "Commission percent" : "Commission percent"} /></label>
-            <label>{lang === "my" ? "Max DD limit %" : "Max DD limit %"}<input inputMode="decimal" value={ddLimitPct} onChange={(event) => setDdLimitPct(event.target.value)} aria-label={lang === "my" ? "Max drawdown limit" : "Max drawdown limit"} /></label>
-          </div>
-          <div className="backtest-trade-entry">
-            <label>{lang === "my" ? "Trade P/L (USD)" : "Trade P/L (USD)"}<input inputMode="decimal" value={draft} onChange={(event) => setDraft(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); addTrade(); } }} placeholder={lang === "my" ? "ဥပမာ 150 / -80" : "e.g. 150 / -80"} aria-label={lang === "my" ? "Trade profit or loss" : "Trade profit or loss"} /></label>
-            <button type="button" className="primary-button backtest-add" onClick={addTrade}>{lang === "my" ? "Trade ထည့်မည်" : "Add trade"}</button>
-          </div>
-          {trades.length > 0 ? <><div className="backtest-trade-list">{trades.map((pnl, index) => <span key={index} className={pnl > 0 ? "change-positive" : "change-negative"}>{pnl > 0 ? "+" : ""}{fullUsd.format(pnl)}<button type="button" onClick={() => setTrades((prev) => prev.filter((_, i) => i !== index))} aria-label={lang === "my" ? `Trade ${index + 1} ကို ဖျက်မည်` : `Remove trade ${index + 1}`}>×</button></span>)}</div><button type="button" className="backtest-clear" onClick={() => setTrades([])}>{lang === "my" ? "အားလုံးရှင်းမည်" : "Clear all"}</button></> : <p className="form-note">{lang === "my" ? "အမြတ်ကို အပေါင်း၊ အရှုံးကို အနှုတ် နံပါတ်နဲ့ ထည့်ပါ။" : "Enter profits as positive numbers and losses as negative numbers."}</p>}
-          <p className="form-note">{lang === "my" ? "Commission ကို trade ပမာဏ |P/L| ပေါ် ရာခိုင်နှုန်းနဲ့ ခန့်မှန်းနုတ်ထားသည်။" : "Commission is estimated as a percentage of each trade's |P/L|."}</p>
-        </section>
-        <section className="dca-result" aria-live="polite" aria-label={lang === "my" ? "Backtest ရလဒ်" : "Backtest result"}>
-          {result ? <>
-            <div className="backtest-chart"><ResponsiveContainer width="100%" height="100%"><LineChart data={result.curve} margin={{ top: 8, right: 8, bottom: 4, left: 8 }}><CartesianGrid stroke="var(--chart-grid)" strokeDasharray="3 6" /><XAxis dataKey="trade" tick={{ fill: "var(--dim)", fontSize: 10 }} axisLine={false} tickLine={false} /><YAxis tickFormatter={(value: number) => compactUsd.format(value)} tick={{ fill: "var(--dim)", fontSize: 10 }} axisLine={false} tickLine={false} width={64} /><Tooltip formatter={(value) => [fullUsd.format(Number(value)), lang === "my" ? "Equity" : "Equity"]} contentStyle={{ background: "var(--surface-strong)", border: "1px solid var(--border)", borderRadius: 9, fontSize: 11 }} /><Line type="monotone" dataKey="equity" stroke="var(--accent)" strokeWidth={2} dot={false} /></LineChart></ResponsiveContainer></div>
-            <dl>
-              <div><dt>{lang === "my" ? "Win rate" : "Win rate"}</dt><dd>{result.winRate.toFixed(1)}%</dd></div>
-              <div><dt>{lang === "my" ? "Profit factor" : "Profit factor"}</dt><dd>{Number.isFinite(result.profitFactor) ? result.profitFactor.toFixed(2) : "∞"}</dd></div>
-              <div><dt>{lang === "my" ? "Max drawdown" : "Max drawdown"}</dt><dd className={result.ddBreached ? "change-negative" : ""}>{result.maxDd.toFixed(1)}%{result.ddBreached ? (lang === "my" ? " · ကန့်သတ်ချက် ကျော်သွားပြီ" : " · limit breached") : ""}</dd></div>
-              <div><dt>{lang === "my" ? "နောက်ဆုံး equity" : "Final equity"}</dt><dd className={result.finalEquity >= result.start ? "change-positive" : "change-negative"}>{fullUsd.format(result.finalEquity)}</dd></div>
-            </dl>
-          </> : <div className="empty-panel"><strong>{lang === "my" ? "Trade များ ထည့်ပါ" : "Add trades to begin"}</strong><span>{lang === "my" ? "အနည်းဆုံး trade တစ်ခု ထည့်ပြီးမှ ရလဒ် တွက်မည်။" : "Add at least one trade to calculate results."}</span></div>}
-        </section>
+    const equityValue = Number(equity);
+    const riskValue = Number(riskPct);
+    const entryValue = Number(entry);
+    const stopValue = Number(stop);
+    const targetValue = Number(target);
+    const leverageValue = Math.max(1, Number(leverage));
+    const directionValid = direction === "long" ? stopValue < entryValue : stopValue > entryValue;
+    const targetValid = direction === "long" ? targetValue > entryValue : targetValue < entryValue;
+    if (![equityValue, riskValue, entryValue, stopValue, targetValue, leverageValue].every(Number.isFinite) || equityValue <= 0 || riskValue <= 0 || entryValue <= 0 || stopValue <= 0 || !directionValid || !targetValid) return null;
+    const riskBudget = equityValue * riskValue / 100;
+    const stopDistance = Math.abs(entryValue - stopValue);
+    const riskSizedUnits = riskBudget / stopDistance;
+    const maximumNotional = equityValue * leverageValue;
+    const units = Math.min(riskSizedUnits, maximumNotional / entryValue);
+    const notional = units * entryValue;
+    const actualRisk = units * stopDistance;
+    const reward = units * Math.abs(targetValue - entryValue);
+    const margin = notional / leverageValue;
+    const liquidation = leverageValue === 1 ? null : direction === "long" ? entryValue * (1 - 1 / leverageValue) : entryValue * (1 + 1 / leverageValue);
+    return { units, notional, actualRisk, riskBudget, reward, margin, rr: actualRisk > 0 ? reward / actualRisk : 0, liquidation, capped: notional + .000001 < riskSizedUnits * entryValue };
+  }, [direction, entry, equity, leverage, riskPct, stop, target]);
+
+  return <div className="tool-two-column">
+    <section className="feature-section" aria-labelledby="position-heading">
+      <p className="eyebrow">CRYPTO RISK SIZING</p><h1 id="position-heading">{lang === "my" ? "Crypto Position Calculator" : "Crypto Position Calculator"}</h1>
+      <p className="section-description">{lang === "my" ? "Stop loss ရောက်လျှင် သတ်မှတ်ထားသော account risk ထက် မကျော်အောင် position size ကို တွက်ပေးသည်။" : "Sizes a position so a stop-out stays within the account risk you set."}</p>
+      <div className="tool-segment" role="group" aria-label={lang === "my" ? "Coin ရွေးရန်" : "Choose coin"}>{data.quotes.filter((quote) => ["BTC", "ETH", "SOL"].includes(quote.symbol)).map((quote) => <button key={quote.symbol} type="button" aria-pressed={symbol === quote.symbol} onClick={() => chooseSymbol(quote.symbol)}>{quote.symbol}</button>)}</div>
+      <div className="tool-segment direction-segment" role="group" aria-label={lang === "my" ? "Trade ဘက်" : "Trade direction"}><button type="button" aria-pressed={direction === "long"} onClick={() => chooseDirection("long")}>Long</button><button type="button" aria-pressed={direction === "short"} onClick={() => chooseDirection("short")}>Short</button></div>
+      <div className="tool-form-grid">
+        <NumericField label={lang === "my" ? "Account equity" : "Account equity"} value={equity} onChange={setEquity} min={1} suffix="$" />
+        <NumericField label={lang === "my" ? "Trade တစ်ခုလျှင် Risk" : "Risk per trade"} value={riskPct} onChange={setRiskPct} min={0.01} max={100} step="0.1" suffix="%" />
+        <NumericField label={lang === "my" ? "ဝင်ဈေး" : "Entry price"} value={entry} onChange={setEntry} min={0.00000001} suffix="$" />
+        <NumericField label="Stop loss" value={stop} onChange={setStop} min={0.00000001} suffix="$" />
+        <NumericField label={lang === "my" ? "Target ဈေး" : "Target price"} value={target} onChange={setTarget} min={0.00000001} suffix="$" />
+        <NumericField label="Leverage" value={leverage} onChange={setLeverage} min={1} max={125} step="1" suffix="×" />
       </div>
-      <p className="signal-method-note">{lang === "my" ? "ပညာရေးဆိုင်ရာ model သာဖြစ်ပြီး ကိုယ်ပိုင်ရင်းနှီးမြှုပ်နှံမှုအကြံပြုချက် မဟုတ်ပါ။" : "This is an educational model, not personalized investment advice."}</p>
-    </div>
-  );
+    </section>
+    <section className="position-result" aria-live="polite">
+      {result ? <><div className="position-hero"><span>{lang === "my" ? "Position ပမာဏ" : "Position size"}</span><strong>{compactNumber.format(result.units)} {symbol}</strong><small>{fullUsd.format(result.notional)} {lang === "my" ? "တန်ဖိုး" : "notional"}</small></div>
+        {result.capped ? <p className="tool-warning">{lang === "my" ? "Leverage capacity ကြောင့် position ကို လျှော့ထားသည်။ အမှန်တကယ် risk သည် budget ထက် နည်းပါမည်။" : "Leverage capacity caps this position, so actual risk is below the budget."}</p> : null}
+        <dl className="tool-metrics"><div><dt>{lang === "my" ? "Risk budget" : "Risk budget"}</dt><dd>{fullUsd.format(result.riskBudget)}</dd></div><div><dt>{lang === "my" ? "အမှန်တကယ် Risk" : "Actual stop risk"}</dt><dd className="change-negative">{fullUsd.format(result.actualRisk)}</dd></div><div><dt>{lang === "my" ? "Target အမြတ်" : "Target profit"}</dt><dd className="change-positive">+{fullUsd.format(result.reward)}</dd></div><div><dt>Risk : Reward</dt><dd>1 : {result.rr.toFixed(2)}</dd></div><div><dt>{lang === "my" ? "လိုအပ် Margin" : "Required margin"}</dt><dd>{fullUsd.format(result.margin)}</dd></div><div><dt>{lang === "my" ? "ခန့်မှန်း Liquidation" : "Estimated liquidation"}</dt><dd>{result.liquidation === null ? "Spot / none" : fullUsd.format(Math.max(0, result.liquidation))}</dd></div></dl>
+        <p className="tool-footnote">{lang === "my" ? "Liquidation ခန့်မှန်းချက်တွင် maintenance margin၊ fees နှင့် funding မပါဝင်ပါ။ Exchange အလိုက် ကွာနိုင်သည်။" : "The liquidation estimate excludes maintenance margin, fees, and funding; exchange rules vary."}</p></> : <div className="empty-panel"><strong>{lang === "my" ? "Input များကို ပြန်စစ်ပါ" : "Check the inputs"}</strong><span>{direction === "long" ? (lang === "my" ? "Long အတွက် stop သည် entry အောက်၊ target သည် entry အပေါ် ဖြစ်ရမည်။" : "For a long, stop must be below entry and target above it.") : (lang === "my" ? "Short အတွက် stop သည် entry အပေါ်၊ target သည် entry အောက် ဖြစ်ရမည်။" : "For a short, stop must be above entry and target below it.")}</span></div>}
+    </section>
+  </div>;
+}
+
+function HistoricalBacktest({ data, lang }: { data: Dashboard; lang: Language }) {
+  const [initialCapital, setInitialCapital] = useState("10000");
+  const [entryScore, setEntryScore] = useState("30");
+  const [exitScore, setExitScore] = useState("70");
+  const [allocation, setAllocation] = useState("100");
+  const [feePct, setFeePct] = useState("0.1");
+  const [range, setRange] = useState<BacktestRange>("3y");
+
+  const result = useMemo(() => {
+    const capital = Number(initialCapital);
+    const buyBelow = Number(entryScore);
+    const sellAbove = Number(exitScore);
+    const allocationValue = Number(allocation);
+    const feeRate = Number(feePct) / 100;
+    if (![capital, buyBelow, sellAbove, allocationValue, feeRate].every(Number.isFinite) || capital <= 0 || buyBelow < 0 || sellAbove > 100 || buyBelow >= sellAbove || allocationValue <= 0 || allocationValue > 100 || feeRate < 0) return null;
+    const all = [...data.history].filter((point) => point.btcPrice > 0).sort((a, b) => a.date.localeCompare(b.date));
+    if (all.length < 2) return null;
+    const latestDate = new Date(`${all.at(-1)?.date ?? "1970-01-01"}T00:00:00Z`);
+    const cutoff = new Date(latestDate);
+    if (range !== "all") cutoff.setUTCFullYear(cutoff.getUTCFullYear() - (range === "1y" ? 1 : 3));
+    const points = range === "all" ? all : all.filter((point) => new Date(`${point.date}T00:00:00Z`) >= cutoff);
+    if (points.length < 2) return null;
+    let cash = capital;
+    let units = 0;
+    let entryCost = 0;
+    let entryDate = "";
+    let entryPrice = 0;
+    let peak = capital;
+    let maxDrawdown = 0;
+    const trades: BacktestTrade[] = [];
+    const curve: Array<{ date: string; equity: number; btc: number }> = [];
+    for (const point of points) {
+      if (units === 0 && point.score <= buyBelow) {
+        const spend = cash * allocationValue / 100;
+        const fee = spend * feeRate;
+        const purchasable = Math.max(0, spend - fee);
+        units = purchasable / point.btcPrice;
+        cash -= spend;
+        entryCost = spend;
+        entryDate = point.date;
+        entryPrice = point.btcPrice;
+      } else if (units > 0 && point.score >= sellAbove) {
+        const gross = units * point.btcPrice;
+        const proceeds = gross * (1 - feeRate);
+        cash += proceeds;
+        const pnl = proceeds - entryCost;
+        trades.push({ entryDate, entryPrice, exitDate: point.date, exitPrice: point.btcPrice, pnl, returnPct: entryCost > 0 ? pnl / entryCost * 100 : 0, open: false });
+        units = 0; entryCost = 0; entryDate = ""; entryPrice = 0;
+      }
+      const equity = cash + units * point.btcPrice;
+      peak = Math.max(peak, equity);
+      maxDrawdown = Math.max(maxDrawdown, peak > 0 ? (peak - equity) / peak * 100 : 0);
+      curve.push({ date: point.date, equity, btc: capital * point.btcPrice / (points[0]?.btcPrice ?? point.btcPrice) });
+    }
+    const last = points.at(-1);
+    if (!last) return null;
+    const finalEquity = cash + units * last.btcPrice;
+    if (units > 0) {
+      const markValue = units * last.btcPrice * (1 - feeRate);
+      const pnl = markValue - entryCost;
+      trades.push({ entryDate, entryPrice, exitDate: null, exitPrice: last.btcPrice, pnl, returnPct: entryCost > 0 ? pnl / entryCost * 100 : 0, open: true });
+    }
+    const closed = trades.filter((trade) => !trade.open);
+    const wins = closed.filter((trade) => trade.pnl > 0);
+    const losses = closed.filter((trade) => trade.pnl < 0);
+    const grossProfit = wins.reduce((sum, trade) => sum + trade.pnl, 0);
+    const grossLoss = Math.abs(losses.reduce((sum, trade) => sum + trade.pnl, 0));
+    const first = points[0];
+    const buyHoldReturn = first ? (last.btcPrice / first.btcPrice - 1) * 100 : 0;
+    return { points, curve, trades, finalEquity, netReturn: (finalEquity / capital - 1) * 100, buyHoldReturn, maxDrawdown, winRate: closed.length ? wins.length / closed.length * 100 : 0, profitFactor: grossLoss > 0 ? grossProfit / grossLoss : grossProfit > 0 ? Infinity : 0, startDate: first?.date ?? "", endDate: last.date };
+  }, [allocation, data.history, entryScore, exitScore, feePct, initialCapital, range]);
+
+  const chartData = result ? result.curve.filter((_point, index) => index % Math.max(1, Math.ceil(result.curve.length / 180)) === 0 || index === result.curve.length - 1) : [];
+  return <div className="backtest-page">
+    <section className="feature-section backtest-controls" aria-labelledby="backtest-heading"><div><p className="eyebrow">MARKET PULSE STRATEGY</p><h1 id="backtest-heading">{lang === "my" ? "BTC Backtest" : "BTC Backtest"}</h1><p className="section-description">{lang === "my" ? "Market Pulse score နိမ့်ချိန် ဝယ်ပြီး မြင့်ချိန် ရောင်းသည့် rule ကို နေ့စဉ် BTC close data ဖြင့် စမ်းသပ်သည်။" : "Tests a rule that buys at a low Market Pulse score and sells at a high score using daily BTC closes."}</p></div><div className="backtest-range" role="group" aria-label={lang === "my" ? "Backtest ကာလ" : "Backtest range"}>{(["1y", "3y", "all"] as const).map((item) => <button type="button" key={item} aria-pressed={range === item} onClick={() => setRange(item)}>{item === "all" ? "ALL" : item.toUpperCase()}</button>)}</div><div className="tool-form-grid backtest-form"><NumericField label={lang === "my" ? "စတင်ငွေ" : "Starting capital"} value={initialCapital} onChange={setInitialCapital} min={1} suffix="$" /><NumericField label={lang === "my" ? "Score အောက်ရောက်လျှင် ဝယ်" : "Buy at score ≤"} value={entryScore} onChange={setEntryScore} min={0} max={99} step="1" /><NumericField label={lang === "my" ? "Score အပေါ်ရောက်လျှင် ရောင်း" : "Sell at score ≥"} value={exitScore} onChange={setExitScore} min={1} max={100} step="1" /><NumericField label={lang === "my" ? "Trade allocation" : "Trade allocation"} value={allocation} onChange={setAllocation} min={1} max={100} step="1" suffix="%" /><NumericField label={lang === "my" ? "တစ်ဘက်စီ Fee" : "Fee per side"} value={feePct} onChange={setFeePct} min={0} max={10} step="0.01" suffix="%" /></div></section>
+    {result ? <><section className="backtest-summary" aria-live="polite"><div className="backtest-hero"><span>{lang === "my" ? "နောက်ဆုံး Equity" : "Ending equity"}</span><strong>{fullUsd.format(result.finalEquity)}</strong><Change value={result.netReturn} /></div><dl className="backtest-metrics"><div><dt>{lang === "my" ? "Strategy return" : "Strategy return"}</dt><dd className={result.netReturn >= 0 ? "change-positive" : "change-negative"}>{result.netReturn >= 0 ? "+" : ""}{result.netReturn.toFixed(2)}%</dd></div><div><dt>BTC buy & hold</dt><dd className={result.buyHoldReturn >= 0 ? "change-positive" : "change-negative"}>{result.buyHoldReturn >= 0 ? "+" : ""}{result.buyHoldReturn.toFixed(2)}%</dd></div><div><dt>Max drawdown</dt><dd className="change-negative">−{result.maxDrawdown.toFixed(2)}%</dd></div><div><dt>{lang === "my" ? "အပြီးပိတ် Trades" : "Closed trades"}</dt><dd>{result.trades.filter((trade) => !trade.open).length}</dd></div><div><dt>Win rate</dt><dd>{result.winRate.toFixed(1)}%</dd></div><div><dt>Profit factor</dt><dd>{Number.isFinite(result.profitFactor) ? result.profitFactor.toFixed(2) : "∞"}</dd></div></dl></section>
+      <section className="feature-section backtest-chart-card"><div className="section-heading"><div><p className="eyebrow">EQUITY CURVE</p><h2>{lang === "my" ? "Strategy နှင့် BTC Buy & Hold" : "Strategy vs BTC buy & hold"}</h2></div><span className="history-count">{formatDay(result.startDate, lang)} — {formatDay(result.endDate, lang)}</span></div><div className="backtest-chart" role="img" aria-label={lang === "my" ? "Backtest equity curve" : "Backtest equity curve"}><ResponsiveContainer width="100%" height="100%"><LineChart data={chartData} margin={{ top: 10, right: 12, bottom: 8, left: 4 }}><CartesianGrid vertical={false} stroke="var(--chart-grid)" strokeDasharray="3 6" /><XAxis dataKey="date" minTickGap={34} tickFormatter={(value: string) => formatHistoryTick(value, lang, range === "all" ? "all" : range === "1y" ? "1y" : "180d")} tick={{ fill: "var(--dim)", fontSize: 9 }} axisLine={false} tickLine={false} /><YAxis tickFormatter={(value: number) => compactUsd.format(value)} tick={{ fill: "var(--dim)", fontSize: 9 }} axisLine={false} tickLine={false} width={58} /><Tooltip formatter={(value, name) => [fullUsd.format(Number(value)), name === "equity" ? (lang === "my" ? "Strategy" : "Strategy") : "BTC buy & hold"]} labelFormatter={(value) => formatDay(String(value), lang)} contentStyle={{ background: "var(--surface-strong)", border: "1px solid var(--border)", borderRadius: 9, fontSize: 10 }} /><Line type="monotone" dataKey="equity" stroke="var(--accent)" strokeWidth={2.5} dot={false} /><Line type="monotone" dataKey="btc" stroke="#f4b740" strokeWidth={1.8} strokeDasharray="5 4" dot={false} /></LineChart></ResponsiveContainer></div><div className="backtest-legend"><span><i className="strategy-line" />Strategy</span><span><i className="btc-line" />BTC buy & hold</span></div></section>
+      <section className="feature-section"><div className="section-heading"><div><p className="eyebrow">TRADE LOG</p><h2>{lang === "my" ? "Backtest trades" : "Backtest trades"}</h2></div><span className="history-count">{result.trades.length}</span></div>{result.trades.length ? <div className="trade-log"><div className="trade-log-head"><span>{lang === "my" ? "ဝင်" : "Entry"}</span><span>{lang === "my" ? "ထွက်" : "Exit"}</span><span>P/L</span></div>{result.trades.slice().reverse().slice(0, 12).map((trade, index) => <article key={`${trade.entryDate}-${index}`}><div><time>{formatDay(trade.entryDate, lang)}</time><strong>{fullUsd.format(trade.entryPrice)}</strong></div><div><time>{trade.exitDate ? formatDay(trade.exitDate, lang) : (lang === "my" ? "ဖွင့်ထား" : "Open")}</time><strong>{fullUsd.format(trade.exitPrice)}</strong></div><span className={trade.pnl >= 0 ? "change-positive" : "change-negative"}>{trade.pnl >= 0 ? "+" : ""}{fullUsd.format(trade.pnl)}<small>{trade.returnPct >= 0 ? "+" : ""}{trade.returnPct.toFixed(2)}%</small></span></article>)}</div> : <div className="empty-panel"><strong>{lang === "my" ? "ဒီ rule ဖြင့် trade မဖြစ်သေးပါ" : "No trades matched this rule"}</strong><span>{lang === "my" ? "Buy / sell threshold ကို ပြောင်းပြီး ထပ်စမ်းပါ။" : "Adjust the buy and sell thresholds to test another rule."}</span></div>}</section></> : <section className="feature-section"><div className="empty-panel"><strong>{lang === "my" ? "Backtest input မမှန်ပါ" : "Invalid backtest inputs"}</strong><span>{lang === "my" ? "Buy score သည် sell score ထက် နည်းရမည်။" : "The buy score must be lower than the sell score."}</span></div></section>}
+    <p className="tool-footnote">{lang === "my" ? "နေ့စဉ် close ကိုသာ သုံးထားပြီး slippage၊ tax နှင့် intraday fill မပါဝင်ပါ။ Backtest ရလဒ်သည် အနာဂတ်အမြတ်ကို အာမခံခြင်းမရှိပါ။" : "Uses daily closes only and excludes slippage, taxes, and intraday fills. Past backtest results do not guarantee future returns."}</p>
+  </div>;
+}
+
+function BacktestJournal({ lang }: { lang: Language }) {
+  const queryClient = useQueryClient();
+  const journal = useQuery({ queryKey: ["backtest-journal"], queryFn: () => api.getBacktestJournal({}) });
+  const [activeId, setActiveId] = useState<number | null>(null);
+  const [name, setName] = useState("");
+  const [capital, setCapital] = useState("10000");
+  const [ddLimit, setDdLimit] = useState("8");
+  const [commission, setCommission] = useState("0");
+  const [tradeAmount, setTradeAmount] = useState("100");
+  const setJournal = (next: ApiResponse<typeof api, "getBacktestJournal">) => queryClient.setQueryData(["backtest-journal"], next);
+  const create = useMutation({
+    mutationFn: (args: { name: string; initialCapital: number; drawdownLimitPct: number; commissionUsd: number }) => api.createBacktestStrategy(args),
+    onSuccess: (next) => { setJournal(next); setActiveId(next.strategies[0]?.id ?? null); setName(""); },
+  });
+  const addTrade = useMutation({
+    mutationFn: (args: { strategyId: number; result: "win" | "loss"; amountUsd: number }) => api.addBacktestTrade(args),
+    onSuccess: setJournal,
+  });
+  const deleteTrade = useMutation({ mutationFn: (id: number) => api.deleteBacktestTrade({ id }), onSuccess: setJournal });
+  const deleteStrategy = useMutation({
+    mutationFn: (id: number) => api.deleteBacktestStrategy({ id }),
+    onSuccess: (next) => { setJournal(next); setActiveId(next.strategies[0]?.id ?? null); },
+  });
+  const strategies = journal.data?.strategies ?? [];
+  const active = strategies.find((strategy) => strategy.id === activeId) ?? strategies[0];
+  const stats = useMemo(() => {
+    if (!active) return null;
+    const trades = active.trades.slice().reverse();
+    let equity = active.initialCapital;
+    let peak = equity;
+    let maxDrawdown = 0;
+    let best = 0;
+    let worst = 0;
+    let winStreak = 0;
+    let lossStreak = 0;
+    let currentWin = 0;
+    let currentLoss = 0;
+    const curve = [{ trade: 0, equity }];
+    for (const [index, trade] of trades.entries()) {
+      const change = trade.result === "win" ? trade.amountUsd - active.commissionUsd : -(trade.amountUsd + active.commissionUsd);
+      equity += change;
+      peak = Math.max(peak, equity);
+      maxDrawdown = Math.max(maxDrawdown, peak > 0 ? (peak - equity) / peak * 100 : 0);
+      best = Math.max(best, change);
+      worst = Math.min(worst, change);
+      currentWin = trade.result === "win" ? currentWin + 1 : 0;
+      currentLoss = trade.result === "loss" ? currentLoss + 1 : 0;
+      winStreak = Math.max(winStreak, currentWin);
+      lossStreak = Math.max(lossStreak, currentLoss);
+      curve.push({ trade: index + 1, equity });
+    }
+    const wins = trades.filter((trade) => trade.result === "win");
+    const losses = trades.filter((trade) => trade.result === "loss");
+    const grossWins = wins.reduce((sum, trade) => sum + trade.amountUsd, 0);
+    const grossLosses = losses.reduce((sum, trade) => sum + trade.amountUsd, 0);
+    return { trades, curve, equity, maxDrawdown, best, worst, winStreak, lossStreak, wins, losses, grossWins, grossLosses, profitFactor: grossLosses > 0 ? grossWins / grossLosses : grossWins > 0 ? Infinity : 0 };
+  }, [active]);
+  const submitStrategy = (event: FormEvent) => {
+    event.preventDefault();
+    const initialCapital = Number(capital);
+    const drawdownLimitPct = Number(ddLimit);
+    const commissionUsd = Number(commission);
+    if (!name.trim() || !Number.isFinite(initialCapital) || initialCapital <= 0 || !Number.isFinite(drawdownLimitPct) || drawdownLimitPct <= 0 || drawdownLimitPct > 100 || !Number.isFinite(commissionUsd) || commissionUsd < 0) return;
+    create.mutate({ name: name.trim(), initialCapital, drawdownLimitPct, commissionUsd });
+  };
+  const recordTrade = (result: "win" | "loss") => {
+    const amountUsd = Number(tradeAmount);
+    if (!active || !Number.isFinite(amountUsd) || amountUsd <= 0) return;
+    addTrade.mutate({ strategyId: active.id, result, amountUsd });
+  };
+  if (journal.isPending) return <section className="feature-section update-state"><div className="loader" /><p>{lang === "my" ? "Backtest journal ဖွင့်နေသည်…" : "Loading backtest journal…"}</p></section>;
+  if (journal.isError) return <section className="feature-section empty-panel"><strong>{lang === "my" ? "Journal မဖွင့်နိုင်သေးပါ" : "Journal is unavailable"}</strong><button className="primary-button" type="button" onClick={() => void journal.refetch()}>{copy[lang].retry}</button></section>;
+  return <div className="journal-layout">
+    <section className="feature-section journal-sidebar" aria-labelledby="journal-heading"><div className="section-heading"><div><p className="eyebrow">TRADE JOURNAL</p><h1 id="journal-heading">{lang === "my" ? "Strategy Backtest" : "Strategy backtest"}</h1></div></div><form className="journal-create" onSubmit={submitStrategy}><label className="tool-field"><span>{lang === "my" ? "Strategy နာမည်" : "Strategy name"}</span><div><input value={name} onChange={(event) => setName(event.target.value)} maxLength={60} placeholder={lang === "my" ? "ဥပမာ · Breakout" : "e.g. Breakout"} aria-label={lang === "my" ? "Strategy နာမည်" : "Strategy name"} /></div></label><div className="tool-form-grid"><NumericField label={lang === "my" ? "စတင်ငွေ" : "Capital"} value={capital} onChange={setCapital} min={1} suffix="$" /><NumericField label="DD limit" value={ddLimit} onChange={setDdLimit} min={0.1} max={100} step="0.1" suffix="%" /><NumericField label={lang === "my" ? "Trade ကော်မရှင်" : "Commission"} value={commission} onChange={setCommission} min={0} suffix="$" /></div><button className="primary-button" type="submit" disabled={create.isPending}>{create.isPending ? (lang === "my" ? "ဖန်တီးနေသည်…" : "Creating…") : (lang === "my" ? "+ Strategy အသစ်" : "+ New strategy")}</button></form>{strategies.length ? <div className="strategy-list" role="list" aria-label={lang === "my" ? "Strategy များ" : "Strategies"}>{strategies.map((strategy) => <button type="button" role="listitem" key={strategy.id} aria-pressed={active?.id === strategy.id} onClick={() => setActiveId(strategy.id)}><strong>{strategy.name}</strong><span>{fullUsd.format(strategy.initialCapital)} · {strategy.trades.length} trades</span></button>)}</div> : <div className="empty-panel"><strong>{lang === "my" ? "Strategy မရှိသေးပါ" : "No strategy yet"}</strong><span>{lang === "my" ? "အပေါ်တွင် နာမည်နှင့် စတင်ငွေထည့်ပြီး ဖန်တီးပါ။" : "Create one above with a name and starting capital."}</span></div>}</section>
+    <section className="feature-section journal-workspace" aria-live="polite">{active && stats ? <><div className="section-heading journal-active-heading"><div><p className="eyebrow">ACTIVE STRATEGY</p><h2>{active.name}</h2></div><div className="journal-active-actions"><strong className={stats.equity >= active.initialCapital ? "change-positive" : "change-negative"}>{fullUsd.format(stats.equity)}</strong><button type="button" onClick={() => deleteStrategy.mutate(active.id)} disabled={deleteStrategy.isPending} aria-label={`${lang === "my" ? "Strategy ဖျက်မည်" : "Delete strategy"}: ${active.name}`}>{lang === "my" ? "Strategy ဖျက်မည်" : "Delete strategy"}</button></div></div><div className="journal-trade-entry"><NumericField label={lang === "my" ? "Trade P/L ပမာဏ" : "Trade P/L amount"} value={tradeAmount} onChange={setTradeAmount} min={0.01} suffix="$" /><button type="button" className="trade-win" onClick={() => recordTrade("win")} disabled={addTrade.isPending}>+ {lang === "my" ? "အမြတ်" : "Win"}</button><button type="button" className="trade-loss" onClick={() => recordTrade("loss")} disabled={addTrade.isPending}>− {lang === "my" ? "အရှုံး" : "Loss"}</button></div><div className="journal-chart" role="img" aria-label={lang === "my" ? "Trade equity curve" : "Trade equity curve"}><ResponsiveContainer width="100%" height="100%"><LineChart data={stats.curve} margin={{ top: 10, right: 8, bottom: 4, left: 4 }}><CartesianGrid vertical={false} stroke="var(--chart-grid)" strokeDasharray="3 6" /><XAxis dataKey="trade" tickFormatter={(value: number) => `#${value}`} tick={{ fill: "var(--dim)", fontSize: 9 }} axisLine={false} tickLine={false} /><YAxis tickFormatter={(value: number) => compactUsd.format(value)} tick={{ fill: "var(--dim)", fontSize: 9 }} axisLine={false} tickLine={false} width={58} /><Tooltip formatter={(value) => [fullUsd.format(Number(value)), lang === "my" ? "Equity" : "Equity"]} labelFormatter={(value) => `${lang === "my" ? "Trade" : "Trade"} #${value}`} contentStyle={{ background: "var(--surface-strong)", border: "1px solid var(--border)", borderRadius: 9, fontSize: 10 }} /><Line type="monotone" dataKey="equity" stroke="var(--accent)" strokeWidth={2.5} dot={{ r: 2.5 }} /></LineChart></ResponsiveContainer></div><dl className="journal-metrics"><div><dt>Win rate</dt><dd>{stats.trades.length ? (stats.wins.length / stats.trades.length * 100).toFixed(1) : "0.0"}%</dd></div><div><dt>Profit factor</dt><dd>{Number.isFinite(stats.profitFactor) ? stats.profitFactor.toFixed(2) : "∞"}</dd></div><div><dt>Max drawdown</dt><dd className={stats.maxDrawdown > active.drawdownLimitPct ? "change-negative" : ""}>{stats.maxDrawdown.toFixed(2)}% / {active.drawdownLimitPct.toFixed(1)}%</dd></div><div><dt>{lang === "my" ? "အကောင်းဆုံး Trade" : "Best trade"}</dt><dd className="change-positive">+{fullUsd.format(stats.best)}</dd></div><div><dt>{lang === "my" ? "အဆိုးဆုံး Trade" : "Worst trade"}</dt><dd className="change-negative">{fullUsd.format(stats.worst)}</dd></div><div><dt>{lang === "my" ? "ဆက်တိုက် အမြတ် / အရှုံး" : "Win / loss streak"}</dt><dd>{stats.winStreak} / {stats.lossStreak}</dd></div></dl>{stats.trades.length ? <div className="journal-log">{active.trades.slice(0, 12).map((trade) => <article key={trade.id}><span className={trade.result === "win" ? "trade-pill-win" : "trade-pill-loss"}>{trade.result === "win" ? (lang === "my" ? "အမြတ်" : "WIN") : (lang === "my" ? "အရှုံး" : "LOSS")}</span><time>{formatTime(trade.createdAt, lang)}</time><strong className={trade.result === "win" ? "change-positive" : "change-negative"}>{trade.result === "win" ? "+" : "−"}{fullUsd.format(trade.amountUsd)}</strong><button type="button" onClick={() => deleteTrade.mutate(trade.id)} aria-label={`${lang === "my" ? "Trade ဖျက်မည်" : "Delete trade"} ${fullUsd.format(trade.amountUsd)}`}>×</button></article>)}</div> : <div className="empty-panel"><strong>{lang === "my" ? "Trade မမှတ်ရသေးပါ" : "No trades recorded"}</strong><span>{lang === "my" ? "P/L ပမာဏထည့်ပြီး အမြတ် သို့မဟုတ် အရှုံးကို နှိပ်ပါ။" : "Enter the P/L amount, then record a win or loss."}</span></div>}<p className="tool-footnote">{lang === "my" ? `Trade တစ်ခုစီတွင် ${fullUsd.format(active.commissionUsd)} commission ထည့်တွက်ထားသည်။` : `${fullUsd.format(active.commissionUsd)} commission is applied to every trade.`}</p></> : <div className="empty-panel"><strong>{lang === "my" ? "Strategy တစ်ခုဖန်တီးပါ" : "Create a strategy"}</strong><span>{lang === "my" ? "ပြီးလျှင် trade ရလဒ်များကို တစ်ခုချင်းမှတ်နိုင်သည်။" : "Then record each trade result to build the equity curve."}</span></div>}</section>
+  </div>;
+}
+
+function BacktestCalculator({ data, lang }: { data: Dashboard; lang: Language }) {
+  const [mode, setMode] = useState<"journal" | "historical">("journal");
+  return <div className="backtest-page"><div className="backtest-mode-toggle" role="group" aria-label={lang === "my" ? "Backtest ပုံစံ" : "Backtest mode"}><button type="button" aria-pressed={mode === "journal"} onClick={() => setMode("journal")}>{lang === "my" ? "Trade Journal" : "Trade journal"}</button><button type="button" aria-pressed={mode === "historical"} onClick={() => setMode("historical")}>{lang === "my" ? "Historical Rule" : "Historical rule"}</button></div>{mode === "journal" ? <BacktestJournal lang={lang} /> : <HistoricalBacktest data={data} lang={lang} />}</div>;
 }
 
 function ScrollToTopButton({ lang }: { lang: Language }) {
@@ -1241,11 +1550,12 @@ function ScrollToTopButton({ lang }: { lang: Language }) {
   return <button type="button" className="scroll-to-top" onClick={scrollToTop} aria-label={label} title={label}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 11 6-6 6 6M12 5v14" /></svg></button>;
 }
 
-function DashboardView({ data, settings, lang, setLang, themeMode, setThemeMode, staleMessage, onRefresh, refreshing, onMarketRefresh, marketRefreshing, marketRefreshMessage, onSettingsChange }: { data: Dashboard; settings: Settings; lang: Language; setLang: (lang: Language) => void; themeMode: ThemeMode; setThemeMode: (mode: ThemeMode) => void; staleMessage: string | null; onRefresh: () => void; refreshing: boolean; onMarketRefresh: () => void; marketRefreshing: boolean; marketRefreshMessage: string | null; onSettingsChange: (settings: Settings) => void }) {
+function DashboardView({ data, settings, lang, setLang, themeMode, setThemeMode, staleMessage, onRefresh, refreshing, onMarketRefresh, marketRefreshing, marketRefreshMessage, onRefreshSocial, refreshingSocial, socialRefreshMessage, onSettingsChange }: { data: Dashboard; settings: Settings; lang: Language; setLang: (lang: Language) => void; themeMode: ThemeMode; setThemeMode: (mode: ThemeMode) => void; staleMessage: string | null; onRefresh: () => void; refreshing: boolean; onMarketRefresh: () => void; marketRefreshing: boolean; marketRefreshMessage: string | null; onRefreshSocial: () => void; refreshingSocial: boolean; socialRefreshMessage: string | null; onSettingsChange: (settings: Settings) => void }) {
   const t = copy[lang];
   const [tab, setTab] = useState<Tab>("overview");
   const [methodOpen, setMethodOpen] = useState(false);
   const [marketRefreshRequested, setMarketRefreshRequested] = useState(false);
+  const [socialRefreshRequested, setSocialRefreshRequested] = useState(false);
   useEffect(() => {
     if (tab !== "markets" || marketRefreshRequested) return;
     const needsData = data.derivatives.length === 0 || data.etfFlows.length === 0 || data.liquidationLevels.length === 0 || data.economicCalendar.length === 0 || data.tokenUnlocks.length === 0;
@@ -1254,8 +1564,20 @@ function DashboardView({ data, settings, lang, setLang, themeMode, setThemeMode,
       onMarketRefresh();
     }
   }, [data.derivatives.length, data.economicCalendar.length, data.etfFlows.length, data.liquidationLevels.length, data.marketIntelligenceStatus, data.tokenUnlocks.length, marketRefreshRequested, onMarketRefresh, tab]);
-  const tabs: Array<{ id: Tab; label: string }> = [{ id: "overview", label: t.overview }, { id: "update", label: t.updateTab }, { id: "signals", label: lang === "my" ? "Trading အချက်ပြများ" : "Trading Signals" }, { id: "weekly", label: lang === "my" ? "Weekly" : "Weekly" }, { id: "watchlist", label: lang === "my" ? "Portfolio & Alerts" : "Portfolio & Alerts" }, { id: "markets", label: lang === "my" ? "Markets" : "Markets" }, { id: "news", label: t.newsTab }, { id: "position", label: lang === "my" ? "Position တွက်မည်" : "Position Calculator" }, { id: "backtest", label: "Backtest" }, { id: "dca", label: "DCA" }];
-  return <main className="app-shell"><span id="dashboard-top-marker" className="dashboard-top-marker" aria-hidden="true" /><section className="topline" aria-label={t.marketStatus}><div><p className="section-kicker">{t.marketStatus}</p><p className="update-time">{t.updated} · {formatTime(data.sourceTime, lang)}</p></div><div className="topline-actions"><ThemeControl mode={themeMode} setMode={setThemeMode} lang={lang} /><LanguageControl lang={lang} setLang={setLang} /><button className="refresh-button" onClick={onRefresh} disabled={refreshing} aria-label={t.refresh}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6v5h-5M4 18v-5h5M18.2 9A7 7 0 0 0 6.4 6.4L4 9m16 6-2.4 2.6A7 7 0 0 1 5.8 15" /></svg><span>{refreshing ? t.refreshing : t.refresh}</span></button></div></section>{staleMessage ? <div className="status-banner" role="status">{staleMessage}</div> : null}<nav className="tab-bar" aria-label="Dashboard sections">{tabs.map((item) => <button key={item.id} onClick={() => setTab(item.id)} aria-current={tab === item.id ? "page" : undefined}>{item.label}</button>)}</nav>{tab === "overview" ? <Overview data={data} lang={lang} onOpenMethod={() => setMethodOpen(true)} /> : null}{tab === "update" ? <MarketUpdate lang={lang} /> : null}{tab === "signals" ? <TradingSignals lang={lang} settings={settings} onSettingsChange={onSettingsChange} /> : null}{tab === "weekly" ? <WeeklyDigest lang={lang} notificationsEnabled={settings.notifications.weeklyDigest} /> : null}{tab === "watchlist" ? <WatchlistAndAlerts data={data} settings={settings} lang={lang} onSettingsChange={onSettingsChange} onRefresh={onRefresh} /> : null}{tab === "markets" ? <MarketIntelligence data={data} lang={lang} onRefresh={onMarketRefresh} refreshing={marketRefreshing} refreshMessage={marketRefreshMessage} /> : null}{tab === "news" ? <NewsAndWhales data={data} lang={lang} /> : null}{tab === "position" ? <PositionCalculator data={data} lang={lang} /> : null}{tab === "backtest" ? <BacktestTool lang={lang} /> : null}{tab === "dca" ? <DcaCalculator data={data} lang={lang} /> : null}<footer className="source-note"><p>{t.sources} · {data.sources.join(" · ")}</p><p>{t.disclaimer}</p></footer><ScrollToTopButton lang={lang} />{methodOpen ? <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.currentTarget === event.target) setMethodOpen(false); }}><section className="method-modal" role="dialog" aria-modal="true" aria-labelledby="method-title"><button className="close-button" onClick={() => setMethodOpen(false)} aria-label={t.dismiss}>×</button><p className="eyebrow">METHODOLOGY</p><h2 id="method-title">{t.methodology}</h2><p>{t.methodIntro}</p><div className="formula"><div><strong>55%</strong><span>Alternative.me Fear & Greed</span></div><div><strong>25%</strong><span>BTC 24-hour momentum</span></div><div><strong>20%</strong><span>{t.newsSentiment}</span></div></div><div className="method-scale" aria-hidden="true" /><div className="method-labels"><span>0 · {t.fear}</span><span>50 · {t.neutral}</span><span>100 · {t.greed}</span></div><p className="method-detail">{t.methodDetail}</p></section></div> : null}</main>;
+  useEffect(() => {
+    const hasSocialRows = data.socialTrends.coins.length > 0 || data.socialTrends.redditPosts.length > 0;
+    if (tab !== "news" || socialRefreshRequested || hasSocialRows) return;
+    setSocialRefreshRequested(true);
+    onRefreshSocial();
+  }, [data.socialTrends.coins.length, data.socialTrends.redditPosts.length, onRefreshSocial, socialRefreshRequested, tab]);
+  const tabs: Array<{ id: Tab; label: string }> = [{ id: "overview", label: t.overview }, { id: "update", label: t.updateTab }, { id: "signals", label: lang === "my" ? "Trading အချက်ပြများ" : "Trading Signals" }, { id: "weekly", label: lang === "my" ? "Weekly" : "Weekly" }, { id: "watchlist", label: lang === "my" ? "Portfolio & Alerts" : "Portfolio & Alerts" }, { id: "markets", label: lang === "my" ? "Markets" : "Markets" }, { id: "news", label: lang === "my" ? "Social / သတင်း" : "Social & News" }, { id: "position", label: lang === "my" ? "Position တွက်မည်" : "Position Calc" }, { id: "backtest", label: "Backtest" }, { id: "dca", label: "DCA" }];
+  const selectTab = (nextTab: Tab) => {
+    setTab(nextTab);
+    window.requestAnimationFrame(() => {
+      document.querySelector<HTMLElement>(".tab-bar")?.scrollIntoView({ block: "start", behavior: "auto" });
+    });
+  };
+  return <main className="app-shell"><span id="dashboard-top-marker" className="dashboard-top-marker" aria-hidden="true" /><section className="topline" aria-label={t.marketStatus}><div><p className="section-kicker">{t.marketStatus}</p><p className="update-time">{t.updated} · {formatTime(data.sourceTime, lang)}</p></div><div className="topline-actions"><ThemeControl mode={themeMode} setMode={setThemeMode} lang={lang} /><LanguageControl lang={lang} setLang={setLang} /><button className="refresh-button" onClick={onRefresh} disabled={refreshing} aria-label={t.refresh}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6v5h-5M4 18v-5h5M18.2 9A7 7 0 0 0 6.4 6.4L4 9m16 6-2.4 2.6A7 7 0 0 1 5.8 15" /></svg><span>{refreshing ? t.refreshing : t.refresh}</span></button></div></section>{staleMessage ? <div className="status-banner" role="status">{staleMessage}</div> : null}<nav className="tab-bar" aria-label="Dashboard sections">{tabs.map((item) => <button type="button" key={item.id} onClick={() => selectTab(item.id)} aria-current={tab === item.id ? "page" : undefined}>{item.label}</button>)}</nav>{tab === "overview" ? <Overview data={data} lang={lang} onOpenMethod={() => setMethodOpen(true)} /> : null}{tab === "update" ? <MarketUpdate lang={lang} /> : null}{tab === "signals" ? <TradingSignals lang={lang} settings={settings} onSettingsChange={onSettingsChange} /> : null}{tab === "weekly" ? <WeeklyDigest lang={lang} notificationsEnabled={settings.notifications.weeklyDigest} /> : null}{tab === "watchlist" ? <WatchlistAndAlerts data={data} settings={settings} lang={lang} onSettingsChange={onSettingsChange} onRefresh={onRefresh} /> : null}{tab === "markets" ? <MarketIntelligence data={data} lang={lang} onRefresh={onMarketRefresh} refreshing={marketRefreshing} refreshMessage={marketRefreshMessage} /> : null}{tab === "news" ? <NewsAndWhales data={data} lang={lang} onRefreshSocial={onRefreshSocial} refreshingSocial={refreshingSocial} socialRefreshMessage={socialRefreshMessage} /> : null}{tab === "position" ? <PositionCalculator data={data} lang={lang} /> : null}{tab === "backtest" ? <BacktestCalculator data={data} lang={lang} /> : null}{tab === "dca" ? <DcaPlanner data={data} lang={lang} /> : null}<footer className="source-note"><p>{t.sources} · {data.sources.join(" · ")}</p><p>{t.disclaimer}</p></footer><ScrollToTopButton lang={lang} />{methodOpen ? <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.currentTarget === event.target) setMethodOpen(false); }}><section className="method-modal" role="dialog" aria-modal="true" aria-labelledby="method-title"><button className="close-button" onClick={() => setMethodOpen(false)} aria-label={t.dismiss}>×</button><p className="eyebrow">METHODOLOGY</p><h2 id="method-title">{t.methodology}</h2><p>{t.methodIntro}</p><div className="formula"><div><strong>55%</strong><span>Alternative.me Fear & Greed</span></div><div><strong>25%</strong><span>BTC 24-hour momentum</span></div><div><strong>20%</strong><span>{t.newsSentiment}</span></div></div><div className="method-scale" aria-hidden="true" /><div className="method-labels"><span>0 · {t.fear}</span><span>50 · {t.neutral}</span><span>100 · {t.greed}</span></div><p className="method-detail">{t.methodDetail}</p></section></div> : null}</main>;
 }
 
 export function App() {
@@ -1274,6 +1596,7 @@ export function App() {
   const settings = useQuery({ queryKey: ["crypto-settings"], queryFn: () => api.getSettings({}) });
   const refresh = useMutation({ mutationFn: () => api.refreshMarketData({}), onSuccess: (result) => { queryClient.setQueryData(["crypto-dashboard"], result); void queryClient.invalidateQueries({ queryKey: ["crypto-settings"] }); } });
   const marketRefresh = useMutation({ mutationFn: () => api.refreshMarketIntelligence({}), onSuccess: (result) => { queryClient.setQueryData(["crypto-dashboard"], result); } });
+  const socialRefresh = useMutation({ mutationFn: () => api.refreshSocialTrends({}), onSuccess: (result) => { queryClient.setQueryData(["crypto-dashboard"], result); } });
   useEffect(() => {
     if (!settings.data || typeof Notification === "undefined" || Notification.permission !== "granted") return;
     try {
@@ -1301,5 +1624,5 @@ export function App() {
   }, [settings.data]);
   if (dashboard.isPending || settings.isPending) return <main className="state-screen"><LanguageControl lang={lang} setLang={setLangState} /><div className="loader" /><p>{t.loading}</p></main>;
   if (dashboard.isError || settings.isError || !dashboard.data?.data || !settings.data) return <main className="state-screen error-state"><LanguageControl lang={lang} setLang={setLangState} /><p className="eyebrow">DATA UNAVAILABLE</p><h1>{t.unavailable}</h1><p>{lang === "en" ? dashboard.data?.messageEn ?? t.connectionIssue : dashboard.data?.message ?? t.connectionIssue}</p><button onClick={() => { void dashboard.refetch(); void settings.refetch(); }} aria-label={t.retry}>{t.retry}</button></main>;
-  return <DashboardView data={dashboard.data.data} settings={settings.data} lang={lang} setLang={setLangState} themeMode={themeMode} setThemeMode={setThemeMode} staleMessage={dashboard.data.status === "stale" ? (lang === "en" ? dashboard.data.messageEn : dashboard.data.message) : null} onRefresh={() => refresh.mutate()} refreshing={refresh.isPending} onMarketRefresh={() => marketRefresh.mutate()} marketRefreshing={marketRefresh.isPending} marketRefreshMessage={marketRefresh.data?.status === "stale" ? (lang === "en" ? marketRefresh.data.messageEn : marketRefresh.data.message) : null} onSettingsChange={(next) => queryClient.setQueryData(["crypto-settings"], next)} />;
+  return <DashboardView data={dashboard.data.data} settings={settings.data} lang={lang} setLang={setLangState} themeMode={themeMode} setThemeMode={setThemeMode} staleMessage={dashboard.data.status === "stale" ? (lang === "en" ? dashboard.data.messageEn : dashboard.data.message) : null} onRefresh={() => refresh.mutate()} refreshing={refresh.isPending} onMarketRefresh={() => marketRefresh.mutate()} marketRefreshing={marketRefresh.isPending} marketRefreshMessage={marketRefresh.data?.status === "stale" ? (lang === "en" ? marketRefresh.data.messageEn : marketRefresh.data.message) : null} onRefreshSocial={() => socialRefresh.mutate()} refreshingSocial={socialRefresh.isPending} socialRefreshMessage={socialRefresh.data?.status === "stale" ? (lang === "en" ? socialRefresh.data.messageEn : socialRefresh.data.message) : null} onSettingsChange={(next) => queryClient.setQueryData(["crypto-settings"], next)} />;
 }

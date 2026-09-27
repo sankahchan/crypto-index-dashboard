@@ -131,3 +131,39 @@ export const tradingSignalSnapshots = sqliteTable(
   },
   (table) => [index("trading_signal_snapshots_symbol_generated_at_idx").on(table.symbol, table.generatedAt)],
 );
+
+export const emaCrossRadarSnapshots = sqliteTable(
+  "ema_cross_radar_snapshots",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    timeframe: text("timeframe", { enum: ["15m", "4H", "1D"] }).notNull().default("1D"),
+    generatedAt: integer("generated_at", { mode: "timestamp_ms" }).notNull(),
+    payload: text("payload").notNull(),
+  },
+  (table) => [index("ema_cross_radar_snapshots_timeframe_generated_at_idx").on(table.timeframe, table.generatedAt)],
+);
+
+export const backtestStrategies = sqliteTable(
+  "backtest_strategies",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    name: text("name").notNull(),
+    initialCapital: real("initial_capital").notNull(),
+    drawdownLimitPct: real("drawdown_limit_pct").notNull(),
+    commissionUsd: real("commission_usd").notNull(),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => [index("backtest_strategies_created_at_idx").on(table.createdAt)],
+);
+
+export const backtestTrades = sqliteTable(
+  "backtest_trades",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    strategyId: integer("strategy_id").notNull(),
+    result: text("result", { enum: ["win", "loss"] }).notNull(),
+    amountUsd: real("amount_usd").notNull(),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => [index("backtest_trades_strategy_created_at_idx").on(table.strategyId, table.createdAt)],
+);

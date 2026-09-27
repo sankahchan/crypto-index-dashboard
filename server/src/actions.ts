@@ -35,6 +35,34 @@ const newsItemSchema = z.object({
   summaryEn: z.string(),
 });
 
+const socialCoinSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  symbol: z.string(),
+  rank: z.number().int().positive(),
+  marketCapRank: z.number().int().positive().nullable(),
+  priceUsd: z.number().nonnegative().nullable().default(null),
+  priceBtc: z.number().nonnegative().nullable(),
+  change24hPct: z.number().nullable(),
+});
+
+const socialPostSchema = z.object({
+  id: z.string(),
+  title: z.string(),
+  url: z.string(),
+  score: z.number().int().nonnegative().nullable(),
+  comments: z.number().int().nonnegative().nullable(),
+  publishedAt: z.string().nullable(),
+});
+
+const socialTrendsSchema = z.object({
+  fetchedAt: z.string().nullable(),
+  coinGeckoStatus: z.enum(["ok", "unavailable"]),
+  redditStatus: z.enum(["ok", "unavailable"]),
+  coins: z.array(socialCoinSchema),
+  redditPosts: z.array(socialPostSchema),
+}).default({ fetchedAt: null, coinGeckoStatus: "unavailable", redditStatus: "unavailable", coins: [], redditPosts: [] });
+
 const whaleSchema = z.object({
   hash: z.string(),
   btc: z.number(),
@@ -62,18 +90,12 @@ const etfFlowSchema = z.object({
 const liquidationLevelSchema = z.object({
   priceUsd: z.number().positive(),
   side: z.enum(["long_below", "short_above"]),
-  magnitudeUsd: z.number().positive(),
+  magnitudeUsd: z.number().positive().nullable(),
+  intensity: z.enum(["light", "moderate", "heavy"]).default("moderate"),
   timeframe: z.string(),
+  asOfDate: z.string().nullable().default(null),
   source: z.string(),
   url: z.string(),
-});
-
-const trendingCoinSchema = z.object({
-  symbol: z.string(),
-  name: z.string(),
-  priceChangePct24h: z.number().nullable(),
-  marketCapRank: z.number().int().nullable(),
-  priceUsd: z.number().nullable(),
 });
 
 const onChainSchema = z.object({
@@ -129,13 +151,13 @@ const dashboardSchema = z.object({
     total: z.number().int(),
   }),
   newsScore: z.number().int().nullable(),
+  socialTrends: socialTrendsSchema,
   whales: z.array(whaleSchema),
   whaleCoverage: z.array(newsItemSchema),
   whaleThresholdBtc: z.number(),
   derivatives: z.array(derivativeSchema),
   etfFlows: z.array(etfFlowSchema).default([]),
   liquidationLevels: z.array(liquidationLevelSchema).default([]),
-  trendingCoins: z.array(trendingCoinSchema).default([]),
   onChain: onChainSchema.nullable(),
   economicCalendar: z.array(calendarItemSchema),
   tokenUnlocks: z.array(unlockItemSchema),
@@ -153,6 +175,27 @@ const dashboardSchema = z.object({
 
 type Dashboard = z.infer<typeof dashboardSchema>;
 
+const backtestTradeSchema = z.object({
+  id: z.number().int(),
+  strategyId: z.number().int(),
+  result: z.enum(["win", "loss"]),
+  amountUsd: z.number().positive(),
+  createdAt: z.string(),
+});
+
+const backtestStrategySchema = z.object({
+  id: z.number().int(),
+  name: z.string(),
+  initialCapital: z.number().positive(),
+  drawdownLimitPct: z.number().positive(),
+  commissionUsd: z.number().nonnegative(),
+  createdAt: z.string(),
+  trades: z.array(backtestTradeSchema),
+});
+
+const backtestJournalSchema = z.object({ strategies: z.array(backtestStrategySchema) });
+type BacktestJournal = z.infer<typeof backtestJournalSchema>;
+
 const resultSchema = z.object({
   status: z.enum(["ok", "stale", "error"]),
   data: dashboardSchema.nullable(),
@@ -161,6 +204,17 @@ const resultSchema = z.object({
 });
 
 type DashboardResult = z.infer<typeof resultSchema>;
+
+const historyBackfillResultSchema = z.object({
+  status: z.enum(["ok", "error"]),
+  points: z.number().int().nonnegative(),
+  from: z.string().nullable(),
+  to: z.string().nullable(),
+  message: z.string().nullable(),
+  messageEn: z.string().nullable(),
+});
+
+type HistoryBackfillResult = z.infer<typeof historyBackfillResultSchema>;
 
 const alertSchema = z.object({
   id: z.number().int(),
@@ -224,6 +278,19 @@ const coinbaseStatsSchema = z.object({
   volume: z.string(),
 });
 
+const coinbaseProductSchema = z.object({
+  id: z.string(),
+  base_currency: z.string(),
+  quote_currency: z.string(),
+  display_name: z.string().optional(),
+  base_name: z.string().optional(),
+  status: z.string().optional(),
+  trading_disabled: z.boolean().optional(),
+  cancel_only: z.boolean().optional(),
+  limit_only: z.boolean().optional(),
+  post_only: z.boolean().optional(),
+}).passthrough();
+
 const candleSchema = z.tuple([
   z.number(),
   z.number(),
@@ -232,6 +299,33 @@ const candleSchema = z.tuple([
   z.number(),
   z.number(),
 ]);
+
+const coinbaseAdvancedCandlesSchema = z.object({
+  candles: z.array(z.object({
+    start: z.string(),
+    low: z.string(),
+    high: z.string(),
+    open: z.string(),
+    close: z.string(),
+    volume: z.string(),
+  })),
+});
+
+const coinbaseAdvancedProductsSchema = z.object({
+  products: z.array(z.object({
+    product_id: z.string(),
+    price: z.string(),
+    volume_24h: z.string(),
+    base_currency_id: z.string().optional(),
+    quote_currency_id: z.string().optional(),
+    display_name: z.string().optional(),
+    status: z.string().optional(),
+    trading_disabled: z.boolean().optional(),
+    cancel_only: z.boolean().optional(),
+    limit_only: z.boolean().optional(),
+    post_only: z.boolean().optional(),
+  }).passthrough()),
+}).passthrough();
 
 const fearGreedResponseSchema = z.object({
   name: z.string(),
@@ -352,12 +446,20 @@ const etfFlowExtractionSchema = z.object({
 const liquidationExtractionSchema = z.object({
   levels: z.array(z.object({
     resultIndex: z.number().int(),
-    priceUsd: z.number().positive(),
-    side: z.enum(["long_below", "short_above"]),
-    magnitudeUsd: z.number().positive(),
+    priceUsd: z.union([z.number(), z.string()]),
+    side: z.string(),
+    magnitudeUsd: z.union([z.number(), z.string()]).nullable(),
+    intensity: z.string(),
     timeframe: z.string(),
-    publishedDate: z.string(),
-  })).max(10),
+    asOfDate: z.string().nullable(),
+  })).max(16),
+});
+
+const socialDiscussionExtractionSchema = z.object({
+  discussions: z.array(z.object({
+    resultIndex: z.number().int(),
+    title: z.string().min(8),
+  })).max(6),
 });
 
 const bilingualTextSchema = z.object({
@@ -503,6 +605,56 @@ const tradingSignalResultSchema = z.object({
 
 type TradingSignalResult = z.infer<typeof tradingSignalResultSchema>;
 
+const emaCrossRadarItemSchema = z.object({
+  productId: z.string(),
+  symbol: z.string(),
+  name: z.string(),
+  price: z.number().positive(),
+  ema50: z.number().positive(),
+  ema100: z.number().positive(),
+  ema200: z.number().positive(),
+  gapPct: z.number().nonnegative(),
+  gapFiveCandlesAgoPct: z.number().nonnegative(),
+  estimatedCandles: z.number().int().positive().nullable(),
+  candleAsOf: z.string(),
+});
+
+const emaRadarTimeframeSchema = z.enum(["15m", "4H", "1D"]);
+type EmaRadarTimeframe = z.infer<typeof emaRadarTimeframeSchema>;
+
+const emaCrossRadarSchema = z.object({
+  generatedAt: z.string(),
+  scanOrigin: z.enum(["automatic", "manual"]).default("manual"),
+  timeframe: emaRadarTimeframeSchema,
+  universeSize: z.number().int().nonnegative(),
+  scannedCount: z.number().int().nonnegative(),
+  skippedCount: z.number().int().nonnegative(),
+  thresholdPct: z.number().positive(),
+  cacheMinutes: z.number().int().positive(),
+  items: z.array(emaCrossRadarItemSchema),
+  source: z.literal("Coinbase Exchange"),
+});
+
+type EmaCrossRadar = z.infer<typeof emaCrossRadarSchema>;
+
+const emaCrossRadarResultSchema = z.object({
+  status: z.enum(["ok", "cached", "stale", "error"]),
+  data: emaCrossRadarSchema.nullable(),
+  message: z.string().nullable(),
+  messageEn: z.string().nullable(),
+});
+
+type EmaCrossRadarResult = z.infer<typeof emaCrossRadarResultSchema>;
+
+const emaCrossRadarBatchResultSchema = z.object({
+  status: z.enum(["ok", "partial", "error"]),
+  results: z.array(emaCrossRadarResultSchema),
+  message: z.string().nullable(),
+  messageEn: z.string().nullable(),
+});
+
+type EmaCrossRadarBatchResult = z.infer<typeof emaCrossRadarBatchResultSchema>;
+
 const aiTradingSignalContentSchema = z.object({
   verdict: tradingVerdictSchema,
   score: z.number().int().min(0).max(100),
@@ -521,6 +673,40 @@ const cryptoCompareNewsSchema = z.object({
     source: z.string().optional(),
     source_info: z.object({ name: z.string().optional() }).passthrough().optional(),
   }).passthrough()),
+}).passthrough();
+
+const coinGeckoTrendingSchema = z.object({
+  coins: z.array(z.object({
+    item: z.object({
+      id: z.string(),
+      name: z.string(),
+      symbol: z.string(),
+      market_cap_rank: z.number().int().positive().nullable().optional(),
+      score: z.number().int().nonnegative(),
+      price_btc: z.number().nonnegative().nullable().optional(),
+      data: z.object({
+        price: z.number().nonnegative().nullable().optional(),
+        price_change_percentage_24h: z.object({ usd: z.number().nullable().optional() }).passthrough().optional(),
+      }).passthrough().optional(),
+    }).passthrough(),
+  }).passthrough()),
+}).passthrough();
+
+const redditHotSchema = z.object({
+  data: z.object({
+    children: z.array(z.object({
+      data: z.object({
+        id: z.string(),
+        title: z.string(),
+        url: z.string(),
+        permalink: z.string().optional(),
+        score: z.number().int(),
+        num_comments: z.number().int(),
+        created_utc: z.number(),
+        stickied: z.boolean().optional(),
+      }).passthrough(),
+    }).passthrough()),
+  }).passthrough(),
 }).passthrough();
 
 type RawNewsItem = {
@@ -561,9 +747,26 @@ const PRODUCTS = [
 ] as const;
 
 const HEADERS = { "User-Agent": "MuseCryptoDashboard/1.2" };
+const SOCIAL_HEADERS = { ...HEADERS, Accept: "application/json" };
 const BLS_SCHEDULE_URL = "https://www.bls.gov/schedule/2026/";
 const TOKEN_UNLOCK_SCHEDULE_URL = "https://crypto-corner.com/2026/09/22/upcoming-token-unlocks-sep-oct-2026/";
+const COINGECKO_TRENDING_URL = "https://api.coingecko.com/api/v3/search/trending";
+const REDDIT_CRYPTO_HOT_URL = "https://www.reddit.com/r/CryptoCurrency/hot.json?raw_json=1&limit=12";
+const REDDIT_CRYPTO_RSS_URL = "https://reddit.com/r/CryptoCurrency/.rss";
+const FEEDER_REDDIT_CRYPTO_URL = "http://Feeder.co/discover/a03db1fb77/reddit-com-r-cryptocurrency";
 const WHALE_THRESHOLD_BTC = 10;
+const EMA_RADAR_UNIVERSE_SIZE = 40;
+const EMA_RADAR_CACHE_MS = 15 * 60 * 1000;
+const EMA_RADAR_REFRESH_DEBOUNCE_MS = 5 * 60 * 1000;
+const EMA_RADAR_THRESHOLD_PCT = 2;
+const EMA_RADAR_TIMEFRAMES: Record<EmaRadarTimeframe, { seconds: number; coinbaseGranularity: "FIFTEEN_MINUTE" | "FOUR_HOUR" | "ONE_DAY" }> = {
+  "15m": { seconds: 900, coinbaseGranularity: "FIFTEEN_MINUTE" },
+  "4H": { seconds: 14_400, coinbaseGranularity: "FOUR_HOUR" },
+  "1D": { seconds: 86_400, coinbaseGranularity: "ONE_DAY" },
+};
+const STABLECOIN_SYMBOLS = new Set([
+  "USDC", "USDT", "DAI", "PYUSD", "GUSD", "USDS", "USDP", "TUSD", "FDUSD", "EURC", "EURT", "PAX", "UST", "USTC", "MIM", "LUSD", "FRAX", "SUSD", "USDQ", "USDE", "RLUSD",
+]);
 const CONFIGURED_NEWS_SOURCES = ["The Block", "CryptoSlate", "crypto.news", "r/CryptoCurrency"] as const;
 const NAMED_SOURCE_FILTER = 'from The Block, CryptoSlate, crypto.news, and Reddit r/CryptoCurrency';
 
@@ -589,14 +792,104 @@ function sentimentFor(score: number) {
   return "Extreme Greed";
 }
 
-async function fetchJson(url: string): Promise<unknown> {
-  const response = await fetch(url, { headers: HEADERS, signal: AbortSignal.timeout(20_000) });
+const EXTERNAL_FETCH_TIMEOUT_MS = 15_000;
+
+async function fetchJson(url: string, headers: Record<string, string> = HEADERS): Promise<unknown> {
+  const response = await fetch(url, { headers, signal: AbortSignal.timeout(EXTERNAL_FETCH_TIMEOUT_MS) });
   if (!response.ok) throw new Error(`Market source returned HTTP ${response.status}`);
   return response.json();
 }
 
+const DAY_SECONDS = 86_400;
+const COINBASE_CANDLE_WINDOW_DAYS = 300;
+
+async function fetchCompleteMarketHistory(): Promise<{
+  fearGreed: z.infer<typeof fearGreedResponseSchema>;
+  candles: z.infer<typeof candleSchema>[];
+}> {
+  const fearGreed = fearGreedResponseSchema.parse(
+    await fetchJson("https://api.alternative.me/fng/?limit=0&format=json"),
+  );
+  const timestamps = fearGreed.data
+    .map((item) => finite(item.timestamp, "history timestamp"))
+    .filter((timestamp) => timestamp > 0);
+  if (timestamps.length === 0) throw new Error("Fear & Greed history is unavailable");
+
+  const earliestTimestamp = Math.floor(Math.min(...timestamps) / DAY_SECONDS) * DAY_SECONDS;
+  const latestTimestamp = Math.floor(Math.max(...timestamps) / DAY_SECONDS) * DAY_SECONDS;
+  const windows: Array<{ start: number; end: number }> = [];
+  let start = earliestTimestamp;
+  while (start <= latestTimestamp) {
+    const end = Math.min(start + (COINBASE_CANDLE_WINDOW_DAYS - 1) * DAY_SECONDS, latestTimestamp);
+    windows.push({ start, end });
+    start = end + DAY_SECONDS;
+  }
+
+  const candleByTimestamp = new Map<number, z.infer<typeof candleSchema>>();
+  for (let index = 0; index < windows.length; index += 3) {
+    const batch = windows.slice(index, index + 3);
+    const payloads = await Promise.all(batch.map(({ start: windowStart, end: windowEnd }) => {
+      const startIso = new Date(windowStart * 1000).toISOString();
+      const endIso = new Date(windowEnd * 1000).toISOString();
+      return fetchJson(`https://api.exchange.coinbase.com/products/BTC-USD/candles?granularity=86400&start=${encodeURIComponent(startIso)}&end=${encodeURIComponent(endIso)}`);
+    }));
+    for (const payload of payloads) {
+      const candles = z.array(candleSchema).parse(payload);
+      for (const candle of candles) candleByTimestamp.set(candle[0], candle);
+    }
+  }
+
+  return {
+    fearGreed,
+    candles: [...candleByTimestamp.values()].sort((a, b) => a[0] - b[0]),
+  };
+}
+
+function buildHistoricalPoints(
+  fearGreed: z.infer<typeof fearGreedResponseSchema>,
+  candles: z.infer<typeof candleSchema>[],
+  currentDate: string,
+  newsScore: number | null,
+): Dashboard["history"] {
+  const candleByTimestamp = new Map<number, z.infer<typeof candleSchema>>();
+  for (const candle of candles) candleByTimestamp.set(candle[0], candle);
+  const orderedCandles = [...candles].sort((a, b) => a[0] - b[0]);
+  const previousCloseByTimestamp = new Map<number, number>();
+  for (let index = 1; index < orderedCandles.length; index += 1) {
+    const current = orderedCandles[index];
+    const previous = orderedCandles[index - 1];
+    if (current && previous) previousCloseByTimestamp.set(current[0], previous[4]);
+  }
+
+  return fearGreed.data
+    .map((item) => {
+      const timestamp = finite(item.timestamp, "history timestamp");
+      const candle = candleByTimestamp.get(timestamp);
+      if (!candle) return null;
+      const previousClose = previousCloseByTimestamp.get(timestamp);
+      const openOrPrevious = previousClose ?? candle[3];
+      const dailyMomentum = openOrPrevious === 0 ? 0 : ((candle[4] - openOrPrevious) / openOrPrevious) * 100;
+      const dailyMomentumScore = momentumToScore(dailyMomentum);
+      const fgValue = Math.round(clamp(finite(item.value, "historical Fear & Greed")));
+      const date = new Date(timestamp * 1000).toISOString().slice(0, 10);
+      const pointNewsScore = date === currentDate ? newsScore : null;
+      return {
+        date,
+        score: pointNewsScore === null
+          ? Math.round(fgValue * 0.7 + dailyMomentumScore * 0.3)
+          : Math.round(fgValue * 0.55 + dailyMomentumScore * 0.25 + pointNewsScore * 0.2),
+        fearGreed: fgValue,
+        btcMomentum: dailyMomentum,
+        btcPrice: candle[4],
+        newsScore: pointNewsScore,
+      };
+    })
+    .filter((item): item is NonNullable<typeof item> => item !== null)
+    .sort((a, b) => a.date.localeCompare(b.date));
+}
+
 async function fetchText(url: string): Promise<string> {
-  const response = await fetch(url, { headers: HEADERS, signal: AbortSignal.timeout(20_000) });
+  const response = await fetch(url, { headers: HEADERS, signal: AbortSignal.timeout(EXTERNAL_FETCH_TIMEOUT_MS) });
   if (!response.ok) throw new Error(`News source returned HTTP ${response.status}`);
   return response.text();
 }
@@ -687,6 +980,212 @@ async function fetchGoogleNews(): Promise<RawNewsItem[]> {
   } catch (_error) {
     return [];
   }
+}
+
+async function fetchCoinGeckoTrends(): Promise<z.infer<typeof socialCoinSchema>[]> {
+  try {
+    const payload = coinGeckoTrendingSchema.parse(await fetchJson(COINGECKO_TRENDING_URL, SOCIAL_HEADERS));
+    return payload.coins.slice(0, 7).map(({ item }, index) => ({
+      id: item.id,
+      name: item.name,
+      symbol: item.symbol.toUpperCase(),
+      rank: index + 1,
+      marketCapRank: item.market_cap_rank ?? null,
+      priceUsd: item.data?.price ?? null,
+      priceBtc: item.price_btc ?? null,
+      change24hPct: item.data?.price_change_percentage_24h?.usd ?? null,
+    }));
+  } catch (_error) {
+    return [];
+  }
+}
+
+function isRedditDailyDiscussion(title: string) {
+  return /\bdaily\b.*\bdiscussion\b/i.test(title);
+}
+
+async function fetchRedditHot(): Promise<z.infer<typeof socialPostSchema>[]> {
+  try {
+    const payload = redditHotSchema.parse(await fetchJson(REDDIT_CRYPTO_HOT_URL, SOCIAL_HEADERS));
+    return payload.data.children
+      .map(({ data }) => {
+        const publishedAt = new Date(data.created_utc * 1000);
+        const discussionUrl = data.permalink
+          ? new URL(data.permalink, REDDIT_CRYPTO_HOT_URL).toString()
+          : data.url;
+        if (data.stickied || data.title.trim().length === 0 || isRedditDailyDiscussion(data.title) || !/^https?:\/\//i.test(discussionUrl) || !Number.isFinite(publishedAt.getTime())) return null;
+        return {
+          id: data.id,
+          title: data.title.trim(),
+          url: discussionUrl,
+          score: Math.max(0, data.score),
+          comments: Math.max(0, data.num_comments),
+          publishedAt: publishedAt.toISOString(),
+        };
+      })
+      .filter((item): item is { id: string; title: string; url: string; score: number; comments: number; publishedAt: string } => item !== null)
+      .slice(0, 6);
+  } catch (_error) {
+    return [];
+  }
+}
+
+async function fetchRedditRss(): Promise<z.infer<typeof socialPostSchema>[]> {
+  try {
+    const xml = await fetchText(REDDIT_CRYPTO_RSS_URL);
+    const rows: z.infer<typeof socialPostSchema>[] = [];
+    const seen = new Set<string>();
+    for (const match of xml.matchAll(/<entry\b[^>]*>([\s\S]*?)<\/entry>/gi)) {
+      const block = match[1];
+      if (!block) continue;
+      const titleMatch = block.match(/<title\b[^>]*>([\s\S]*?)<\/title>/i);
+      const linkMatch = block.match(/<link\b[^>]*\bhref=["']([^"']+)["'][^>]*>/i);
+      const idMatch = block.match(/<id\b[^>]*>([\s\S]*?)<\/id>/i);
+      const updatedMatch = block.match(/<updated\b[^>]*>([\s\S]*?)<\/updated>/i);
+      const rawTitle = titleMatch?.[1];
+      const rawUrl = linkMatch?.[1];
+      if (!rawTitle || !rawUrl) continue;
+      const title = cleanNewsText(rawTitle.replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, "$1"));
+      const url = cleanNewsText(rawUrl);
+      let parsed: URL;
+      try {
+        parsed = new URL(url);
+      } catch (_error) {
+        continue;
+      }
+      const isDiscussion = (parsed.hostname === "reddit.com" || parsed.hostname.endsWith(".reddit.com"))
+        && parsed.pathname.toLowerCase().includes("/r/cryptocurrency/comments/");
+      if (!isDiscussion || title.length < 8 || isRedditDailyDiscussion(title) || seen.has(parsed.toString())) continue;
+      const updated = updatedMatch ? new Date(cleanNewsText(updatedMatch[1] ?? "")) : null;
+      seen.add(parsed.toString());
+      rows.push({
+        id: idMatch ? cleanNewsText(idMatch[1] ?? parsed.toString()) : parsed.toString(),
+        title,
+        url: parsed.toString(),
+        score: null,
+        comments: null,
+        publishedAt: updated && Number.isFinite(updated.getTime()) ? updated.toISOString() : null,
+      });
+      if (rows.length >= 6) break;
+    }
+    return rows;
+  } catch (_error) {
+    return [];
+  }
+}
+
+async function fetchRedditFeedMirror(): Promise<z.infer<typeof socialPostSchema>[]> {
+  try {
+    const html = await fetchText(FEEDER_REDDIT_CRYPTO_URL);
+    const seen = new Set<string>();
+    const rows: z.infer<typeof socialPostSchema>[] = [];
+    for (const match of html.matchAll(/<a[^>]+href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi)) {
+      const href = match[1];
+      const rawTitle = match[2];
+      if (!href || !rawTitle) continue;
+      const title = cleanNewsText(rawTitle);
+      if (title.length < 12 || /^read full$/i.test(title) || isRedditDailyDiscussion(title)) continue;
+      let parsed: URL;
+      try {
+        parsed = new URL(href, FEEDER_REDDIT_CRYPTO_URL);
+      } catch (_error) {
+        continue;
+      }
+      const isCryptoCurrencyPost = (parsed.hostname === "reddit.com" || parsed.hostname.endsWith(".reddit.com"))
+        && parsed.pathname.toLowerCase().includes("/r/cryptocurrency/comments/");
+      if (!isCryptoCurrencyPost || seen.has(parsed.toString())) continue;
+      seen.add(parsed.toString());
+      const pathParts = parsed.pathname.split("/").filter(Boolean);
+      const commentIndex = pathParts.findIndex((part) => part.toLowerCase() === "comments");
+      rows.push({
+        id: commentIndex >= 0 ? pathParts[commentIndex + 1] ?? parsed.toString() : parsed.toString(),
+        title,
+        url: parsed.toString(),
+        score: null,
+        comments: null,
+        publishedAt: null,
+      });
+      if (rows.length >= 6) break;
+    }
+    return rows;
+  } catch (_error) {
+    return [];
+  }
+}
+
+async function searchRedditDiscussions(ctx: Ctx): Promise<z.infer<typeof socialPostSchema>[]> {
+  try {
+    const search = await ctx.tool.web_search(
+      "r/CryptoCurrency latest hot discussions Reddit Feeder",
+      { language_code: "en", timeout_secs: 35 },
+    );
+    const results = search.content.results.slice(0, 10);
+    const directPosts = results.flatMap((item, index) => {
+      if (!item.url || !item.title || isRedditDailyDiscussion(item.title)) return [];
+      try {
+        const parsed = new URL(item.url);
+        const isCryptoCurrency = (parsed.hostname === "reddit.com" || parsed.hostname.endsWith(".reddit.com"))
+          && parsed.pathname.toLowerCase().includes("/r/cryptocurrency/");
+        if (!isCryptoCurrency) return [];
+      } catch (_error) {
+        return [];
+      }
+      const publishedAt = item.published_at && Number.isFinite(new Date(item.published_at).getTime())
+        ? new Date(item.published_at).toISOString()
+        : null;
+      return [{
+        id: `search-${index}-${item.url}`,
+        title: item.title.trim(),
+        url: item.url,
+        score: null,
+        comments: null,
+        publishedAt,
+      }];
+    }).slice(0, 6);
+    if (directPosts.length > 0) return directPosts;
+
+    const extracted = await ctx.inference.complete(
+      `Extract up to six distinct current discussion titles that the supplied public search results explicitly identify as latest posts from Reddit r/CryptoCurrency. Do not invent, rewrite, summarize, or combine titles. Omit navigation labels, feed names, daily discussion megathreads, and any title whose source result does not explicitly identify r/CryptoCurrency. resultIndex is the zero-based index of the source result containing the title.\n\n${JSON.stringify(results)}`,
+      { schema: socialDiscussionExtractionSchema },
+    );
+    const seen = new Set<string>();
+    return extracted.discussions.flatMap((discussion, index) => {
+      const source = results[discussion.resultIndex];
+      const title = discussion.title.trim();
+      if (!source?.url || !/^https?:\/\//i.test(source.url) || title.length < 8 || isRedditDailyDiscussion(title) || seen.has(title.toLowerCase())) return [];
+      seen.add(title.toLowerCase());
+      return [{
+        id: `public-feed-${index}-${title}`,
+        title,
+        url: source.url,
+        score: null,
+        comments: null,
+        publishedAt: null,
+      }];
+    });
+  } catch (_error) {
+    return [];
+  }
+}
+
+async function fetchSocialTrends(ctx: Ctx): Promise<z.infer<typeof socialTrendsSchema>> {
+  const [coins, directRedditPosts] = await Promise.all([fetchCoinGeckoTrends(), fetchRedditHot()]);
+  const rssRedditPosts = directRedditPosts.length > 0 ? [] : await fetchRedditRss();
+  const mirroredRedditPosts = directRedditPosts.length > 0 || rssRedditPosts.length > 0 ? [] : await fetchRedditFeedMirror();
+  const redditPosts = directRedditPosts.length > 0
+    ? directRedditPosts
+    : rssRedditPosts.length > 0
+      ? rssRedditPosts
+      : mirroredRedditPosts.length > 0
+        ? mirroredRedditPosts
+        : await searchRedditDiscussions(ctx);
+  return {
+    fetchedAt: new Date().toISOString(),
+    coinGeckoStatus: coins.length > 0 ? "ok" : "unavailable",
+    redditStatus: redditPosts.length > 0 ? "ok" : "unavailable",
+    coins,
+    redditPosts,
+  };
 }
 
 function namedSourceFor(item: RawNewsItem) {
@@ -910,56 +1409,83 @@ async function fetchEtfFlows(ctx: Ctx): Promise<{ items: z.infer<typeof etfFlowS
 
 async function fetchLiquidationLevels(ctx: Ctx): Promise<{ items: z.infer<typeof liquidationLevelSchema>[]; status: "ok" | "empty" | "unavailable" }> {
   try {
-    const search = await ctx.tool.web_search(
-      "current BTC liquidation heatmap largest long and short liquidation clusters exact price level USD CoinGlass",
-      { language_code: "en", timeout_secs: 45 },
-    );
-    const rows = search.content.results.slice(0, 12);
+    const now = new Date();
+    const year = now.getUTCFullYear();
+    const month = now.toLocaleString("en-US", { month: "long", timeZone: "UTC" });
+    const searches = await Promise.all([
+      ctx.tool.web_search(
+        `BTC liquidation heatmap clusters ${month} ${year} price long short exact levels`,
+        { language_code: "en", timeout_secs: 45 },
+      ),
+      ctx.tool.web_search(
+        `Bitcoin liquidation heatmap levels current week ${month} ${year} exact price`,
+        { language_code: "en", timeout_secs: 45 },
+      ),
+    ]);
+    const seenUrls = new Set<string>();
+    const rows = searches.flatMap((search) => search.content.results).filter((item) => {
+      if (!item.url || seenUrls.has(item.url)) return false;
+      seenUrls.add(item.url);
+      return true;
+    }).slice(0, 18);
     if (rows.length === 0) return { items: [], status: "empty" };
     const extracted = await ctx.inference.complete(
-      `Extract only Bitcoin liquidation clusters explicitly stated in the supplied results and published within the last 14 calendar days. Each row needs the article's exact publication date (publishedDate in YYYY-MM-DD), an exact BTC price in USD, an explicit side (long liquidations below market or short liquidations above market), an explicit USD magnitude, and the stated timeframe. Never use a crawl date, update-check date, or today's date as the publication date. Do not treat support, resistance, open interest, or predicted targets as liquidation levels. Do not infer missing dates or magnitudes. resultIndex is the zero-based source result index. Today is ${new Date().toISOString().slice(0, 10)} UTC.\n\n${JSON.stringify(rows)}`,
+      `Extract only Bitcoin liquidation heatmap clusters explicitly stated in the supplied results. Each row needs one exact BTC price in USD and an explicitly described heat intensity. Write side as the literal string long_below when the source calls it long liquidation risk or clearly places the heatmap exposure below the stated current BTC price; write short_above when it calls it short liquidation risk or clearly places the heatmap exposure above the stated current BTC price. Write intensity as light, moderate, or heavy: map light/small to light, elevated/bright/concentration to moderate, and heavy/largest/prominent/significant to heavy. For timeframe, preserve an explicit period such as 24-hour, three-day, or seven-day; when the source only says latest liquidation map, write latest published map. Use an exact observation or article publication date in YYYY-MM-DD for asOfDate when the supplied result explicitly contains one; otherwise return null and the server will independently validate the source publication timestamp. If an explicit USD liquidation magnitude is stated for that exact price, include it; otherwise magnitudeUsd must be null. Do not invent a midpoint for a price range: when a report states a range, use each explicitly printed endpoint only. Do not treat technical support, resistance, open interest, sell orders, order-book liquidity, or predicted targets as liquidation levels. resultIndex is the zero-based source result index. Today is ${new Date().toISOString().slice(0, 10)} UTC.\n\n${JSON.stringify(rows)}`,
       { schema: liquidationExtractionSchema },
     );
+    const parseNumber = (value: number | string | null) => {
+      if (value === null) return null;
+      const parsed = typeof value === "number" ? value : Number(value.replace(/[$,\s]/g, ""));
+      return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+    };
+    const normalizeSide = (value: string): "long_below" | "short_above" | null => {
+      const normalized = value.toLowerCase();
+      if (normalized === "long_below" || normalized.includes("long")) return "long_below";
+      if (normalized === "short_above" || normalized.includes("short")) return "short_above";
+      return null;
+    };
+    const normalizeIntensity = (value: string): "light" | "moderate" | "heavy" | null => {
+      const normalized = value.toLowerCase();
+      if (/heavy|largest|prominent|major|dense|significant/.test(normalized)) return "heavy";
+      if (/moderate|elevated|bright|concentrat/.test(normalized)) return "moderate";
+      if (/light|small/.test(normalized)) return "light";
+      return null;
+    };
     const seen = new Set<string>();
     const items = extracted.levels.flatMap((item) => {
       const source = rows[item.resultIndex];
-      const key = `${Math.round(item.priceUsd)}-${item.side}`;
-      const publishedAt = new Date(`${item.publishedDate}T00:00:00Z`).getTime();
-      const ageMs = Date.now() - publishedAt;
-      if (!source?.url || !/^https?:\/\//i.test(source.url) || !Number.isFinite(publishedAt) || ageMs < 0 || ageMs > 14 * 86_400_000 || seen.has(key)) return [];
+      const priceUsd = parseNumber(item.priceUsd);
+      const magnitudeUsd = parseNumber(item.magnitudeUsd);
+      const side = normalizeSide(item.side);
+      const intensity = normalizeIntensity(item.intensity);
+      const sourcePublishedAt = source?.published_at && Number.isFinite(new Date(source.published_at).getTime())
+        ? new Date(source.published_at).toISOString().slice(0, 10)
+        : null;
+      const itemDate = item.asOfDate && Number.isFinite(new Date(item.asOfDate).getTime())
+        ? new Date(item.asOfDate).toISOString().slice(0, 10)
+        : null;
+      const asOfDate = itemDate ?? sourcePublishedAt;
+      const observedAt = asOfDate ? new Date(`${asOfDate}T00:00:00Z`).getTime() : Number.NaN;
+      const ageMs = Date.now() - observedAt;
+      const timeframe = item.timeframe.trim();
+      if (!source?.url || !/^https?:\/\//i.test(source.url) || priceUsd === null || side === null || intensity === null || timeframe.length === 0 || asOfDate === null || !Number.isFinite(observedAt) || ageMs < 0 || ageMs > 14 * 86_400_000) return [];
+      const key = `${Math.round(priceUsd)}-${side}`;
+      if (seen.has(key)) return [];
       seen.add(key);
-      return [{ priceUsd: item.priceUsd, side: item.side, magnitudeUsd: item.magnitudeUsd, timeframe: item.timeframe, source: source.source?.trim() || "Liquidation heatmap report", url: source.url }];
+      return [{
+        priceUsd,
+        side,
+        magnitudeUsd,
+        intensity,
+        timeframe,
+        asOfDate,
+        source: source.source?.trim() || "Liquidation heatmap report",
+        url: source.url,
+      }];
     }).sort((a, b) => a.priceUsd - b.priceUsd);
     return { items, status: items.length > 0 ? "ok" : "empty" };
   } catch (_error) {
     return { items: [], status: "unavailable" };
-  }
-}
-
-async function fetchTrendingCoins(): Promise<z.infer<typeof trendingCoinSchema>[]> {
-  try {
-    const payload = (await fetchJson("https://api.coingecko.com/api/v3/search/trending")) as {
-      coins?: Array<{ item?: { symbol?: unknown; name?: unknown; market_cap_rank?: unknown; data?: { price?: unknown; price_change_percentage_24h?: { usd?: unknown } } } }>;
-    };
-    const coins = Array.isArray(payload?.coins) ? payload.coins : [];
-    return coins.slice(0, 7).flatMap((entry) => {
-      const item = entry?.item ?? {};
-      const symbol = typeof item.symbol === "string" ? item.symbol.toUpperCase() : "";
-      const name = typeof item.name === "string" ? item.name : "";
-      const rawChange = item.data?.price_change_percentage_24h?.usd;
-      const rawRank = item.market_cap_rank;
-      const rawPrice = item.data?.price;
-      if (!symbol || !name) return [];
-      return [{
-        symbol,
-        name,
-        priceChangePct24h: typeof rawChange === "number" && Number.isFinite(rawChange) ? rawChange : null,
-        marketCapRank: typeof rawRank === "number" && Number.isInteger(rawRank) ? rawRank : null,
-        priceUsd: typeof rawPrice === "number" && Number.isFinite(rawPrice) ? rawPrice : null,
-      }];
-    });
-  } catch (_error) {
-    return [];
   }
 }
 
@@ -1177,7 +1703,7 @@ async function fetchResearchCalendar(ctx: Ctx): Promise<{
 }
 
 async function fetchLiveDashboard(ctx: Ctx): Promise<Dashboard> {
-  const [statsPayloads, candlesPayload, fearGreedPayload, timePayload, whales, newsResult, whaleCoverageResult, derivatives, etfFlowResult, liquidationResult, onChain, researchCalendar, trendingCoins] = await Promise.all([
+  const [statsPayloads, completeHistory, timePayload, whales, newsResult, whaleCoverageResult, socialTrends, derivatives, etfFlowResult, liquidationResult, onChain, researchCalendar] = await Promise.all([
     Promise.all(
       PRODUCTS.map(async (product) => {
         try {
@@ -1188,22 +1714,20 @@ async function fetchLiveDashboard(ctx: Ctx): Promise<Dashboard> {
         }
       }),
     ),
-    fetchJson("https://api.exchange.coinbase.com/products/BTC-USD/candles?granularity=86400"),
-    fetchJson("https://api.alternative.me/fng/?limit=30&format=json"),
+    fetchCompleteMarketHistory(),
     fetchJson("https://api.exchange.coinbase.com/time"),
     fetchWhales(),
     fetchNews(ctx),
     fetchWhaleCoverage(ctx),
+    fetchSocialTrends(ctx),
     fetchDerivatives(),
     fetchEtfFlows(ctx),
     fetchLiquidationLevels(ctx),
     fetchOnChain(),
     fetchResearchCalendar(ctx),
-    fetchTrendingCoins(),
   ]);
 
-  const candles = z.array(candleSchema).parse(candlesPayload);
-  const fearGreed = fearGreedResponseSchema.parse(fearGreedPayload);
+  const { candles, fearGreed } = completeHistory;
   const sourceTime = coinbaseTimeSchema.parse(timePayload);
   const latestFearGreed = fearGreed.data[0];
   const btcStats = statsPayloads[0];
@@ -1245,41 +1769,7 @@ async function fetchLiveDashboard(ctx: Ctx): Promise<Dashboard> {
     : Math.round(fearGreedValue * 0.55 + momentumScore * 0.25 + newsScore * 0.2);
   const currentDate = sourceTime.iso.slice(0, 10);
 
-  const candleByTimestamp = new Map<number, (typeof candles)[number]>();
-  for (const candle of candles) candleByTimestamp.set(candle[0], candle);
-  const orderedCandles = [...candles].sort((a, b) => a[0] - b[0]);
-  const previousCloseByTimestamp = new Map<number, number>();
-  for (let index = 1; index < orderedCandles.length; index += 1) {
-    const current = orderedCandles[index];
-    const previous = orderedCandles[index - 1];
-    if (current && previous) previousCloseByTimestamp.set(current[0], previous[4]);
-  }
-
-  const history = fearGreed.data
-    .map((item) => {
-      const timestamp = finite(item.timestamp, "history timestamp");
-      const candle = candleByTimestamp.get(timestamp);
-      if (!candle) return null;
-      const previousClose = previousCloseByTimestamp.get(timestamp);
-      const openOrPrevious = previousClose ?? candle[3];
-      const dailyMomentum = openOrPrevious === 0 ? 0 : ((candle[4] - openOrPrevious) / openOrPrevious) * 100;
-      const dailyMomentumScore = momentumToScore(dailyMomentum);
-      const fgValue = Math.round(clamp(finite(item.value, "historical Fear & Greed")));
-      const date = new Date(timestamp * 1000).toISOString().slice(0, 10);
-      const pointNewsScore = date === currentDate ? newsScore : null;
-      return {
-        date,
-        score: pointNewsScore === null
-          ? Math.round(fgValue * 0.7 + dailyMomentumScore * 0.3)
-          : Math.round(fgValue * 0.55 + dailyMomentumScore * 0.25 + pointNewsScore * 0.2),
-        fearGreed: fgValue,
-        btcMomentum: dailyMomentum,
-        btcPrice: candle[4],
-        newsScore: pointNewsScore,
-      };
-    })
-    .filter((item): item is NonNullable<typeof item> => item !== null)
-    .sort((a, b) => a.date.localeCompare(b.date));
+  const history = buildHistoricalPoints(fearGreed, candles, currentDate, newsScore);
 
   return dashboardSchema.parse({
     fetchedAt: new Date().toISOString(),
@@ -1297,13 +1787,13 @@ async function fetchLiveDashboard(ctx: Ctx): Promise<Dashboard> {
     news,
     newsSentiment: { ...newsSentiment, total: news.length },
     newsScore,
+    socialTrends,
     whales,
     whaleCoverage: whaleCoverageResult.items,
     whaleThresholdBtc: WHALE_THRESHOLD_BTC,
     derivatives,
     etfFlows: etfFlowResult.items,
     liquidationLevels: liquidationResult.items,
-    trendingCoins,
     onChain,
     economicCalendar: researchCalendar.economicEvents,
     tokenUnlocks: researchCalendar.tokenUnlocks,
@@ -1316,7 +1806,7 @@ async function fetchLiveDashboard(ctx: Ctx): Promise<Dashboard> {
       refreshedAt: new Date().toISOString(),
     },
     configuredNewsSources: [...CONFIGURED_NEWS_SOURCES],
-    sources: ["Coinbase Exchange", "Alternative.me Fear & Greed Index", "Blockchain.com", "CoinGecko", ...new Set([...derivatives.map((item) => item.source), ...etfFlowResult.items.map((item) => item.source), ...liquidationResult.items.map((item) => item.source), ...(onChain ? ["Coin Metrics Community"] : []), ...newsResult.providers, ...whaleCoverageResult.providers, ...researchCalendar.economicEvents.map((item) => item.source), ...researchCalendar.tokenUnlocks.map((item) => item.source)])],
+    sources: ["Coinbase Exchange", "Alternative.me Fear & Greed Index", "Blockchain.com", ...(socialTrends.coinGeckoStatus === "ok" ? ["CoinGecko Trending"] : []), ...(socialTrends.redditStatus === "ok" ? ["r/CryptoCurrency"] : []), ...new Set([...derivatives.map((item) => item.source), ...etfFlowResult.items.map((item) => item.source), ...liquidationResult.items.map((item) => item.source), ...(onChain ? ["Coin Metrics Community"] : []), ...newsResult.providers, ...whaleCoverageResult.providers, ...researchCalendar.economicEvents.map((item) => item.source), ...researchCalendar.tokenUnlocks.map((item) => item.source)])],
   });
 }
 
@@ -1438,11 +1928,16 @@ function onChainSignal(dashboard: Dashboard, symbol: string) {
 
 async function latestTradingSignal(ctx: Ctx, symbol: string): Promise<TradingSignal | null> {
   const db = ctx.db<typeof schema>();
-  const rows = await db.select().from(schema.tradingSignalSnapshots).where(eq(schema.tradingSignalSnapshots.symbol, symbol)).orderBy(desc(schema.tradingSignalSnapshots.generatedAt)).limit(1);
-  const row = rows[0];
-  if (!row) return null;
-  const parsed = tradingSignalSchema.safeParse(JSON.parse(row.payload));
-  return parsed.success ? parsed.data : null;
+  const rows = await db.select().from(schema.tradingSignalSnapshots).where(eq(schema.tradingSignalSnapshots.symbol, symbol)).orderBy(desc(schema.tradingSignalSnapshots.generatedAt)).limit(10);
+  for (const row of rows) {
+    try {
+      const parsed = tradingSignalSchema.safeParse(JSON.parse(row.payload));
+      if (parsed.success) return parsed.data;
+    } catch (_error) {
+      // Ignore a damaged snapshot and continue to the next newest valid row.
+    }
+  }
+  return null;
 }
 
 async function createTradingSignal(ctx: Ctx, symbol: "BTC" | "ETH" | "SOL"): Promise<TradingSignalResult> {
@@ -1521,32 +2016,351 @@ ${JSON.stringify(evidence)}`,
   }
 }
 
+async function mapWithConcurrency<T, R>(items: T[], concurrency: number, worker: (item: T) => Promise<R>): Promise<R[]> {
+  const results: R[] = [];
+  let nextIndex = 0;
+  async function runWorker() {
+    while (nextIndex < items.length) {
+      const index = nextIndex;
+      nextIndex += 1;
+      const item = items[index];
+      if (item === undefined) continue;
+      results[index] = await worker(item);
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(concurrency, items.length) }, () => runWorker()));
+  return results;
+}
+
+async function fetchCoinbaseJson(url: string): Promise<unknown> {
+  const response = await fetch(url, { headers: HEADERS, signal: AbortSignal.timeout(12_000) });
+  if (!response.ok) throw new Error(`Coinbase returned HTTP ${response.status}`);
+  return response.json();
+}
+
+async function latestEmaCrossRadar(ctx: Ctx, timeframe: EmaRadarTimeframe): Promise<EmaCrossRadar | null> {
+  const db = ctx.db<typeof schema>();
+  const rows = await db.select().from(schema.emaCrossRadarSnapshots)
+    .where(eq(schema.emaCrossRadarSnapshots.timeframe, timeframe))
+    .orderBy(desc(schema.emaCrossRadarSnapshots.generatedAt))
+    .limit(10);
+  for (const row of rows) {
+    try {
+      const parsed = emaCrossRadarSchema.safeParse(JSON.parse(row.payload));
+      if (parsed.success) return parsed.data;
+    } catch (_error) {
+      // Ignore a damaged snapshot and continue to the next newest valid row.
+    }
+  }
+  return null;
+}
+
+async function fetchEmaRadarCandles(productId: string, timeframe: EmaRadarTimeframe): Promise<z.infer<typeof candleSchema>[]> {
+  const config = EMA_RADAR_TIMEFRAMES[timeframe];
+  const end = Math.floor(Date.now() / 1000);
+  const start = end - config.seconds * 300;
+  const url = `https://api.coinbase.com/api/v3/brokerage/market/products/${encodeURIComponent(productId)}/candles?start=${start}&end=${end}&granularity=${config.coinbaseGranularity}&limit=300`;
+  const payload = coinbaseAdvancedCandlesSchema.parse(await fetchCoinbaseJson(url));
+  return payload.candles.slice(0, 300).map((candle) => candleSchema.parse([
+    finite(candle.start, `${productId} candle time`),
+    finite(candle.low, `${productId} candle low`),
+    finite(candle.high, `${productId} candle high`),
+    finite(candle.open, `${productId} candle open`),
+    finite(candle.close, `${productId} candle close`),
+    finite(candle.volume, `${productId} candle volume`),
+  ]));
+}
+
+function calculateEmaCrossCandidate(product: z.infer<typeof coinbaseProductSchema>, candles: z.infer<typeof candleSchema>[]) {
+  const ordered = [...candles].sort((a, b) => a[0] - b[0]);
+  const closes = ordered.map((candle) => candle[4]).filter((value) => Number.isFinite(value) && value > 0);
+  if (closes.length < 200) return null;
+  const ema50Series = emaSeries(closes, 50);
+  const ema100Series = emaSeries(closes, 100);
+  const ema200Series = emaSeries(closes, 200);
+  const latestIndex = closes.length - 1;
+  const comparisonIndex = latestIndex - 5;
+  const price = closes[latestIndex];
+  const ema50 = ema50Series[latestIndex];
+  const ema100 = ema100Series[latestIndex];
+  const ema200 = ema200Series[latestIndex];
+  const priorEma50 = ema50Series[comparisonIndex];
+  const priorEma200 = ema200Series[comparisonIndex];
+  const latestCandle = ordered.at(-1);
+  if (price === undefined || ema50 === undefined || ema100 === undefined || ema200 === undefined || priorEma50 === undefined || priorEma200 === undefined || !latestCandle) return null;
+  const signedGap = ema200 - ema50;
+  const priorSignedGap = priorEma200 - priorEma50;
+  const gapPct = Math.abs(signedGap) / price * 100;
+  const priorGapPct = Math.abs(priorSignedGap) / (closes[comparisonIndex] ?? price) * 100;
+  if (!(signedGap > 0 && priorSignedGap > signedGap && gapPct < EMA_RADAR_THRESHOLD_PCT)) return null;
+  const candleConvergence = (priorSignedGap - signedGap) / 5;
+  const estimate = candleConvergence > 0 ? Math.ceil(signedGap / candleConvergence) : null;
+  const existing = PRODUCTS.find((item) => item.symbol === product.base_currency);
+  const fallbackName = product.display_name?.replace(/\s*\/\s*USD$/i, "").trim();
+  return emaCrossRadarItemSchema.parse({
+    productId: product.id,
+    symbol: product.base_currency,
+    name: product.base_name?.trim() || existing?.name || fallbackName || product.base_currency,
+    price: Number(price.toPrecision(10)),
+    ema50: Number(ema50.toPrecision(10)),
+    ema100: Number(ema100.toPrecision(10)),
+    ema200: Number(ema200.toPrecision(10)),
+    gapPct: Number(gapPct.toFixed(4)),
+    gapFiveCandlesAgoPct: Number(priorGapPct.toFixed(4)),
+    estimatedCandles: estimate !== null && estimate > 0 && estimate <= 365 ? estimate : null,
+    candleAsOf: new Date(latestCandle[0] * 1000).toISOString(),
+  });
+}
+
+type EmaRadarScanOrigin = "automatic" | "manual";
+type EmaRadarScanTrigger = "read" | EmaRadarScanOrigin;
+
+async function scanEmaCrossRadar(ctx: Ctx, timeframe: EmaRadarTimeframe, trigger: EmaRadarScanTrigger): Promise<EmaCrossRadarResult> {
+  const db = ctx.db<typeof schema>();
+  const cached = await latestEmaCrossRadar(ctx, timeframe);
+  const cacheAge = cached ? Date.now() - new Date(cached.generatedAt).getTime() : Number.POSITIVE_INFINITY;
+  const freshnessLimit = trigger === "read" ? EMA_RADAR_CACHE_MS : EMA_RADAR_REFRESH_DEBOUNCE_MS;
+  if (cached && cacheAge < freshnessLimit) {
+    if (trigger === "automatic") {
+      const generatedAt = new Date().toISOString();
+      const automaticSnapshot = emaCrossRadarSchema.parse({ ...cached, generatedAt, scanOrigin: "automatic", timeframe });
+      await db.insert(schema.emaCrossRadarSnapshots).values({ timeframe, generatedAt: new Date(generatedAt), payload: JSON.stringify(automaticSnapshot) });
+      ctx.invalidateQueries();
+      return {
+        status: "cached",
+        data: automaticSnapshot,
+        message: "API ကို မဖိအားပေးရန် လတ်တလော scan ရလဒ်ကို အလိုအလျောက် snapshot အဖြစ် သိမ်းထားသည်။",
+        messageEn: "The recent scan was saved as the automatic snapshot to avoid excessive API requests.",
+      };
+    }
+    return {
+      status: "cached",
+      data: cached,
+      message: trigger === "manual" ? "API ကို မကြာခဏမခေါ်ရန် လတ်တလော scan ကို ပြန်သုံးထားသည်။" : null,
+      messageEn: trigger === "manual" ? "The recent scan was reused to avoid excessive API requests." : null,
+    };
+  }
+  const scanOrigin: EmaRadarScanOrigin = trigger === "automatic" ? "automatic" : "manual";
+  try {
+    const productsPayload = coinbaseAdvancedProductsSchema.parse(await fetchCoinbaseJson(
+      "https://api.coinbase.com/api/v3/brokerage/market/products?limit=250&product_type=SPOT",
+    ));
+    const ranked = productsPayload.products.flatMap((row) => {
+      const [derivedBase = "", derivedQuote = ""] = row.product_id.split("-");
+      const baseCurrency = (row.base_currency_id ?? derivedBase).toUpperCase();
+      const quoteCurrency = (row.quote_currency_id ?? derivedQuote).toUpperCase();
+      const price = Number(row.price);
+      const volume = Number(row.volume_24h);
+      if (quoteCurrency !== "USD"
+        || !baseCurrency
+        || STABLECOIN_SYMBOLS.has(baseCurrency)
+        || row.status?.toLowerCase() === "offline"
+        || row.trading_disabled === true
+        || row.cancel_only === true
+        || !Number.isFinite(price)
+        || !Number.isFinite(volume)
+        || price <= 0
+        || volume <= 0) return [];
+      const product = coinbaseProductSchema.parse({
+        id: row.product_id,
+        base_currency: baseCurrency,
+        quote_currency: quoteCurrency,
+        display_name: row.display_name,
+        status: row.status,
+        trading_disabled: row.trading_disabled,
+        cancel_only: row.cancel_only,
+        limit_only: row.limit_only,
+        post_only: row.post_only,
+      });
+      return [{ product, quoteVolume: price * volume }];
+    }).sort((a, b) => b.quoteVolume - a.quoteVolume).slice(0, EMA_RADAR_UNIVERSE_SIZE);
+    const scans = await mapWithConcurrency(ranked, 6, async ({ product }) => {
+      try {
+        const candles = await fetchEmaRadarCandles(product.id, timeframe);
+        return { scanned: candles.length >= 200, item: calculateEmaCrossCandidate(product, candles) };
+      } catch {
+        return { scanned: false, item: null };
+      }
+    });
+    const items = scans.flatMap((scan) => scan.item ? [scan.item] : []).sort((a, b) => a.gapPct - b.gapPct);
+    const scannedCount = scans.filter((scan) => scan.scanned).length;
+    const generatedAt = new Date().toISOString();
+    const radar = emaCrossRadarSchema.parse({
+      generatedAt,
+      scanOrigin,
+      timeframe,
+      universeSize: ranked.length,
+      scannedCount,
+      skippedCount: ranked.length - scannedCount,
+      thresholdPct: EMA_RADAR_THRESHOLD_PCT,
+      cacheMinutes: EMA_RADAR_CACHE_MS / 60_000,
+      items,
+      source: "Coinbase Exchange",
+    });
+    await db.insert(schema.emaCrossRadarSnapshots).values({ timeframe, generatedAt: new Date(generatedAt), payload: JSON.stringify(radar) });
+    if (cached) {
+      const previousSymbols = new Set(cached.items.map((item) => item.symbol));
+      const entered = items.filter((item) => !previousSymbols.has(item.symbol));
+      if (entered.length > 0) {
+        const preferences = await db.select().from(schema.notificationPreferences).where(eq(schema.notificationPreferences.id, 1)).limit(1);
+        if (preferences[0]?.signalAlerts) {
+          for (const item of entered) {
+            await db.insert(schema.tradingSignalEvents).values({
+              symbol: `${item.symbol} · ${timeframe}`,
+              previousVerdict: "not_approaching",
+              newVerdict: "golden_cross_approaching",
+              confidence: Math.round(clamp(100 - item.gapPct * 20, 55, 95)),
+              triggeredAt: new Date(generatedAt),
+              dismissed: false,
+            });
+          }
+        }
+      }
+    }
+    const rows = await db.select({ id: schema.emaCrossRadarSnapshots.id }).from(schema.emaCrossRadarSnapshots)
+      .where(eq(schema.emaCrossRadarSnapshots.timeframe, timeframe))
+      .orderBy(desc(schema.emaCrossRadarSnapshots.generatedAt))
+      .limit(30);
+    const staleIds = rows.slice(12).map((row) => row.id);
+    if (staleIds.length > 0) await db.delete(schema.emaCrossRadarSnapshots).where(inArray(schema.emaCrossRadarSnapshots.id, staleIds));
+    ctx.invalidateQueries();
+    return { status: "ok", data: radar, message: null, messageEn: null };
+  } catch {
+    if (cached) {
+      return {
+        status: "stale",
+        data: cached,
+        message: "Coinbase scan အသစ် မရသေးသဖြင့် ရွေးထားသော timeframe ၏ နောက်ဆုံး scan ကို ပြထားသည်။",
+        messageEn: "A fresh Coinbase scan is unavailable, so the latest scan for this timeframe is shown.",
+      };
+    }
+    return {
+      status: "error",
+      data: null,
+      message: "ဤ timeframe အတွက် EMA Cross Radar ကို ယခု scan မလုပ်နိုင်သေးပါ။",
+      messageEn: "EMA Cross Radar cannot scan this timeframe right now.",
+    };
+  }
+}
+
+async function scanAllEmaCrossRadarTimeframes(ctx: Ctx): Promise<EmaCrossRadarBatchResult> {
+  const results: EmaCrossRadarResult[] = [];
+  for (const timeframe of emaRadarTimeframeSchema.options) {
+    results.push(await scanEmaCrossRadar(ctx, timeframe, "automatic"));
+  }
+  const successCount = results.filter((result) => result.data !== null).length;
+  return {
+    status: successCount === results.length ? "ok" : successCount > 0 ? "partial" : "error",
+    results,
+    message: successCount === results.length ? null : successCount > 0 ? "Timeframe အချို့ကိုသာ scan လုပ်နိုင်ခဲ့သည်။" : "Timeframe သုံးခုလုံးကို scan မလုပ်နိုင်သေးပါ။",
+    messageEn: successCount === results.length ? null : successCount > 0 ? "Only some timeframes could be scanned." : "None of the three timeframes could be scanned.",
+  };
+}
+
 function buildReferenceLevels(dashboard: Dashboard) {
   const btc = dashboard.quotes.find((quote) => quote.symbol === "BTC");
   if (!btc) throw new Error("Bitcoin quote is unavailable");
   const closes = dashboard.history.map((point) => point.btcPrice).filter(Number.isFinite);
-  const recent = closes.slice(-7);
-  const last30 = closes.slice(-30);
+  const sevenDayCloses = closes.slice(-7);
+  const thirtyDayCloses = closes.slice(-30);
   return {
-    sevenDayLow: recent.length > 0 ? Math.min(...recent) : btc.price,
-    thirtyDayLow: last30.length > 0 ? Math.min(...last30) : btc.price,
-    thirtyDayHigh: last30.length > 0 ? Math.max(...last30) : btc.price,
+    sevenDayLow: sevenDayCloses.length > 0 ? Math.min(...sevenDayCloses) : btc.price,
+    thirtyDayLow: thirtyDayCloses.length > 0 ? Math.min(...thirtyDayCloses) : btc.price,
+    thirtyDayHigh: thirtyDayCloses.length > 0 ? Math.max(...thirtyDayCloses) : btc.price,
+  };
+}
+
+function buildMeasuredDailyUpdate(dashboard: Dashboard): z.infer<typeof dailyUpdateContentSchema> {
+  const btc = dashboard.quotes.find((quote) => quote.symbol === "BTC");
+  if (!btc) throw new Error("Bitcoin quote is unavailable");
+  const levels = buildReferenceLevels(dashboard);
+  const directionMm = btc.changePct > 0 ? "မြင့်တက်" : btc.changePct < 0 ? "လျော့ကျ" : "မပြောင်းလဲ";
+  const directionEn = btc.changePct > 0 ? "rose" : btc.changePct < 0 ? "fell" : "was unchanged";
+  const newsLineMm = dashboard.newsScore === null
+    ? "သတင်း sentiment score မရရှိသေးသောကြောင့် Market Pulse ကို ဈေးနှုန်းနှင့် Fear & Greed data ဖြင့်သာ ဖတ်ရှုပါ။"
+    : `သတင်း ${dashboard.newsSentiment.total} ပုဒ်မှ sentiment score ${dashboard.newsScore}/100 ရှိသည်။`;
+  const newsLineEn = dashboard.newsScore === null
+    ? "No news-sentiment score is available, so read the Market Pulse alongside price and Fear & Greed data only."
+    : `${dashboard.newsSentiment.total} sourced stories produced a news-sentiment score of ${dashboard.newsScore}/100.`;
+  return {
+    headline: {
+      mm: `BTC 24 နာရီအတွင်း ${Math.abs(btc.changePct).toFixed(2)}% ${directionMm}၊ Market Pulse ${dashboard.score}/100`,
+      en: `BTC ${directionEn} ${Math.abs(btc.changePct).toFixed(2)}% in 24 hours as Market Pulse reads ${dashboard.score}/100`,
+    },
+    deck: {
+      mm: `BTC သည် $${btc.price.toLocaleString("en-US", { maximumFractionDigits: 0 })} ဝန်းကျင်တွင်ရှိပြီး Fear & Greed ${dashboard.fearGreed.value}/100 ဖြစ်သည်။ ဤ update သည် လတ်တလော live readings များကို တိုက်ရိုက်အနှစ်ချုပ်ထားသည်။`,
+      en: `BTC is near $${btc.price.toLocaleString("en-US", { maximumFractionDigits: 0 })} with Fear & Greed at ${dashboard.fearGreed.value}/100. This update is a direct summary of the latest live readings.`,
+    },
+    keyTakeaways: [
+      { mm: `BTC 24 နာရီပြောင်းလဲမှု ${btc.changePct >= 0 ? "+" : ""}${btc.changePct.toFixed(2)}% ဖြစ်သည်။`, en: `BTC's 24-hour change is ${btc.changePct >= 0 ? "+" : ""}${btc.changePct.toFixed(2)}%.` },
+      { mm: `Market Pulse ${dashboard.score}/100 နှင့် Fear & Greed ${dashboard.fearGreed.value}/100 ကို အတူကြည့်ပါ။`, en: `Market Pulse is ${dashboard.score}/100 and Fear & Greed is ${dashboard.fearGreed.value}/100.` },
+      { mm: newsLineMm, en: newsLineEn },
+    ],
+    macroOutlook: [
+      {
+        label: { mm: "စျေးကွက်ခံစားချက်", en: "Market mood" },
+        title: { mm: `Fear & Greed ${dashboard.fearGreed.value}/100`, en: `Fear & Greed ${dashboard.fearGreed.value}/100` },
+        body: { mm: "ဤ reading သည် လက်ရှိ risk appetite ကိုပြသည်။ Price trend အတည်ပြုချက်မပါဘဲ တစ်ခုတည်း မသုံးသင့်ပါ။", en: "This reading reflects current risk appetite and should not be used without price-trend confirmation." },
+      },
+      {
+        label: { mm: "အတည်ပြုထားသော data", en: "Confirmed data" },
+        title: { mm: "သတ်မှတ်ရက်ရှိ macro catalyst မထည့်ထားပါ", en: "No dated macro catalyst asserted" },
+        body: { mm: "ရင်းမြစ် data တွင် အတည်ပြုနိုင်သော သတ်မှတ်ရက်ရှိ event မရှိသဖြင့် ဤ update သည် market readings ပေါ်တွင်သာ အခြေခံထားသည်။", en: "The source data did not confirm a specific dated event, so this update stays with measured market readings." },
+      },
+    ],
+    bitcoinAnalysis: {
+      title: { mm: "BTC range နှင့် momentum", en: "BTC range and momentum" },
+      body: {
+        mm: `BTC သည် ၇ ရက်အနိမ့် $${levels.sevenDayLow.toLocaleString("en-US", { maximumFractionDigits: 0 })} နှင့် ၃၀ ရက်အမြင့် $${levels.thirtyDayHigh.toLocaleString("en-US", { maximumFractionDigits: 0 })} ကြားတွင် ရှိသည်။ 24-hour move ကို range breakout အတည်ပြုချက်နှင့် တွဲကြည့်ပါ။`,
+        en: `BTC sits between the seven-day low near $${levels.sevenDayLow.toLocaleString("en-US", { maximumFractionDigits: 0 })} and the 30-day high near $${levels.thirtyDayHigh.toLocaleString("en-US", { maximumFractionDigits: 0 })}. Read the 24-hour move alongside confirmation of any range break.`,
+      },
+    },
+    scenarios: [
+      {
+        name: { mm: "အပြုသဘော", en: "Constructive" },
+        trigger: { mm: `BTC သည် $${levels.thirtyDayHigh.toLocaleString("en-US", { maximumFractionDigits: 0 })} အထက်တွင် တည်ငြိမ်ပြီး momentum ဆက်ကောင်းလာပါက။`, en: `BTC holds above $${levels.thirtyDayHigh.toLocaleString("en-US", { maximumFractionDigits: 0 })} with improving momentum.` },
+        posture: { mm: "Breakout အတည်ပြုချက်၊ position size နှင့် stop level ကို ဦးစားပေးပါ။", en: "Prioritize breakout confirmation, position sizing, and a defined stop level." },
+      },
+      {
+        name: { mm: "ကြားနေ", en: "Neutral" },
+        trigger: { mm: "BTC သည် လတ်တလော range အတွင်း ဆက်လှုပ်ရှားပါက။", en: "BTC continues to trade inside its recent range." },
+        posture: { mm: "ဆုံးဖြတ်ချက်ကို အဆင့်လိုက်လုပ်ပြီး leverage ကို ကန့်သတ်ပါ။", en: "Stage decisions and keep leverage limited while the range holds." },
+      },
+      {
+        name: { mm: "အနုတ်လက္ခဏာ", en: "Adverse" },
+        trigger: { mm: `BTC သည် ၃၀ ရက်အနိမ့် $${levels.thirtyDayLow.toLocaleString("en-US", { maximumFractionDigits: 0 })} အောက်ကျပြီး sentiment လည်း အားနည်းလာပါက။`, en: `BTC breaks below the 30-day low near $${levels.thirtyDayLow.toLocaleString("en-US", { maximumFractionDigits: 0 })} as sentiment weakens.` },
+        posture: { mm: "Leverage လျှော့ပြီး ဆုံးရှုံးနိုင်သည့်ပမာဏကို ကြိုတင်ကန့်သတ်ပါ။", en: "Reduce leverage and cap the amount at risk before entering." },
+      },
+    ],
+    riskChecklist: [
+      { mm: "Trade တစ်ခုချင်းစီအတွက် အများဆုံးဆုံးရှုံးနိုင်သည့်ပမာဏကို ကြိုသတ်မှတ်ပါ။", en: "Define the maximum loss for each trade before entry." },
+      { mm: "Liquidation price နှင့် stop-loss price ကို မရောပါနှင့်။", en: "Do not confuse the liquidation price with the stop-loss price." },
+      { mm: "Headline တစ်ခုတည်းထက် price၊ volume နှင့် sentiment readings များကို အတူစစ်ပါ။", en: "Check price, volume, and sentiment readings together rather than relying on one headline." },
+    ],
   };
 }
 
 async function latestDailyUpdate(ctx: Ctx): Promise<DailyMarketUpdate | null> {
   const db = ctx.db<typeof schema>();
-  const rows = await db.select().from(schema.dailyMarketUpdates).orderBy(desc(schema.dailyMarketUpdates.generatedAt)).limit(1);
-  const row = rows[0];
-  if (!row) return null;
-  const parsed = dailyMarketUpdateSchema.safeParse(JSON.parse(row.payload));
-  return parsed.success ? parsed.data : null;
+  const rows = await db.select().from(schema.dailyMarketUpdates).orderBy(desc(schema.dailyMarketUpdates.generatedAt)).limit(10);
+  for (const row of rows) {
+    try {
+      const parsed = dailyMarketUpdateSchema.safeParse(JSON.parse(row.payload));
+      if (parsed.success) return parsed.data;
+    } catch (_error) {
+      // Ignore a damaged update and continue to the next newest valid row.
+    }
+  }
+  return null;
 }
 
 async function createDailyMarketUpdate(ctx: Ctx): Promise<DailyUpdateResult> {
   const db = ctx.db<typeof schema>();
   try {
-    const dashboard = await fetchLiveDashboard(ctx);
+    // The hourly refresh runs shortly before the 08:22 daily brief. Reuse that
+    // source-backed snapshot so the scheduled brief is not blocked by another
+    // full upstream crawl; only fetch here when no market snapshot exists yet.
+    const dashboard = await latestSnapshot(ctx) ?? await fetchLiveDashboard(ctx);
     const btc = dashboard.quotes.find((quote) => quote.symbol === "BTC");
     if (!btc) throw new Error("Bitcoin quote is unavailable");
 
@@ -1593,10 +2407,18 @@ async function createDailyMarketUpdate(ctx: Ctx): Promise<DailyUpdateResult> {
       })),
     };
 
-    const content = await ctx.inference.complete(
-      `Write a concise daily cryptocurrency market briefing in both natural Burmese and English using only the supplied market readings and sourced headlines. Lead with what changed and what matters today. Key takeaways must be factual. Macro items may describe the current backdrop or a dated upcoming catalyst only when the supplied evidence explicitly supports it; otherwise say that no specific dated event was confirmed. Bitcoin analysis should connect price action, sentiment, and the observed 7-day/30-day range without presenting a guaranteed forecast. Give exactly three scenarios (constructive, neutral, adverse) with observable triggers and risk-aware postures. The risk checklist must be actionable and avoid personalized financial advice. Do not cite or reuse the historical August report, and do not invent prices, dates, events, ETF flows, or statistics.\n\n${JSON.stringify(evidence)}`,
-      { schema: dailyUpdateContentSchema },
-    );
+    let content: z.infer<typeof dailyUpdateContentSchema>;
+    try {
+      content = await ctx.inference.complete(
+        `Write a concise daily cryptocurrency market briefing in both natural Burmese and English using only the supplied market readings and sourced headlines. Lead with what changed and what matters today. Key takeaways must be factual. Macro items may describe the current backdrop or a dated upcoming catalyst only when the supplied evidence explicitly supports it; otherwise say that no specific dated event was confirmed. Bitcoin analysis should connect price action, sentiment, and the observed 7-day/30-day range without presenting a guaranteed forecast. Give exactly three scenarios (constructive, neutral, adverse) with observable triggers and risk-aware postures. The risk checklist must be actionable and avoid personalized financial advice. Do not cite or reuse the historical August report, and do not invent prices, dates, events, ETF flows, or statistics.\n\n${JSON.stringify(evidence)}`,
+        { schema: dailyUpdateContentSchema },
+      );
+    } catch (_inferenceError) {
+      // A daily scheduled run must still write a fresh, fully source-derived update
+      // when narrative generation is temporarily unavailable. This fallback only
+      // restates measured fields from the live dashboard and adds no external facts.
+      content = buildMeasuredDailyUpdate(dashboard);
+    }
 
     const generatedAt = new Date().toISOString();
     const report = dailyMarketUpdateSchema.parse({
@@ -1649,11 +2471,16 @@ async function createDailyMarketUpdate(ctx: Ctx): Promise<DailyUpdateResult> {
 
 async function latestWeeklyDigest(ctx: Ctx): Promise<WeeklyMarketDigest | null> {
   const db = ctx.db<typeof schema>();
-  const rows = await db.select().from(schema.weeklyMarketDigests).orderBy(desc(schema.weeklyMarketDigests.generatedAt)).limit(1);
-  const row = rows[0];
-  if (!row) return null;
-  const parsed = weeklyMarketDigestSchema.safeParse(JSON.parse(row.payload));
-  return parsed.success ? parsed.data : null;
+  const rows = await db.select().from(schema.weeklyMarketDigests).orderBy(desc(schema.weeklyMarketDigests.generatedAt)).limit(10);
+  for (const row of rows) {
+    try {
+      const parsed = weeklyMarketDigestSchema.safeParse(JSON.parse(row.payload));
+      if (parsed.success) return parsed.data;
+    } catch (_error) {
+      // Ignore a damaged digest and continue to the next newest valid row.
+    }
+  }
+  return null;
 }
 
 async function createWeeklyMarketDigest(ctx: Ctx): Promise<WeeklyDigestResult> {
@@ -1707,11 +2534,72 @@ async function createWeeklyMarketDigest(ctx: Ctx): Promise<WeeklyDigestResult> {
 
 async function latestSnapshot(ctx: Ctx): Promise<Dashboard | null> {
   const db = ctx.db<typeof schema>();
-  const rows = await db.select().from(schema.marketSnapshots).orderBy(desc(schema.marketSnapshots.fetchedAt)).limit(1);
-  const row = rows[0];
-  if (!row) return null;
-  const parsed = dashboardSchema.safeParse(JSON.parse(row.payload));
-  return parsed.success ? parsed.data : null;
+  const rows = await db.select().from(schema.marketSnapshots).orderBy(desc(schema.marketSnapshots.fetchedAt)).limit(10);
+  for (const row of rows) {
+    try {
+      const parsed = dashboardSchema.safeParse(JSON.parse(row.payload));
+      if (parsed.success) return parsed.data;
+    } catch (_error) {
+      // Ignore a damaged snapshot and continue to the next newest valid row.
+    }
+  }
+  return null;
+}
+
+async function backfillHistory(ctx: Ctx): Promise<HistoryBackfillResult> {
+  const cached = await latestSnapshot(ctx);
+  if (!cached) {
+    return {
+      status: "error",
+      points: 0,
+      from: null,
+      to: null,
+      message: "Backfill မလုပ်မီ dashboard snapshot တစ်ခုလိုအပ်သည်။ Market data ကို အရင် refresh လုပ်ပါ။",
+      messageEn: "A dashboard snapshot is required before backfilling. Refresh market data first.",
+    };
+  }
+
+  try {
+    const { fearGreed, candles } = await fetchCompleteMarketHistory();
+    const currentDate = cached.sourceTime.slice(0, 10);
+    const history = buildHistoricalPoints(fearGreed, candles, currentDate, cached.newsScore);
+    if (history.length < 365) throw new Error("Complete source-matched history is unavailable");
+
+    const dashboard = dashboardSchema.parse({ ...cached, history });
+    const db = ctx.db<typeof schema>();
+    await db.insert(schema.marketSnapshots).values({
+      fetchedAt: new Date(),
+      score: dashboard.score,
+      sentiment: dashboard.sentiment,
+      payload: JSON.stringify(dashboard),
+    });
+    const rows = await db
+      .select({ id: schema.marketSnapshots.id })
+      .from(schema.marketSnapshots)
+      .orderBy(desc(schema.marketSnapshots.fetchedAt))
+      .limit(500);
+    const staleIds = rows.slice(168).map((row) => row.id);
+    if (staleIds.length > 0) await db.delete(schema.marketSnapshots).where(inArray(schema.marketSnapshots.id, staleIds));
+    ctx.invalidateQueries();
+
+    return {
+      status: "ok",
+      points: history.length,
+      from: history[0]?.date ?? null,
+      to: history.at(-1)?.date ?? null,
+      message: null,
+      messageEn: null,
+    };
+  } catch (_error) {
+    return {
+      status: "error",
+      points: cached.history.length,
+      from: cached.history[0]?.date ?? null,
+      to: cached.history.at(-1)?.date ?? null,
+      message: "Source နှစ်ခုလုံးတိုက်ဆိုင်သော history အပြည့်အစုံကို ယခုမရယူနိုင်သေးပါ။ ရှိပြီးသား data ကို မပြောင်းထားပါ။",
+      messageEn: "The complete source-matched history is temporarily unavailable. Existing data was left unchanged.",
+    };
+  }
 }
 
 async function evaluateAlerts(ctx: Ctx, dashboard: Dashboard) {
@@ -1756,10 +2644,55 @@ async function evaluateAlerts(ctx: Ctx, dashboard: Dashboard) {
   await db.update(schema.marketAlertPreferences).set({ lastState: state, updatedAt: now }).where(eq(schema.marketAlertPreferences.id, 1));
 }
 
+function isRecentIso(value: string | null | undefined, maxAgeMs: number) {
+  if (!value) return false;
+  const timestamp = new Date(value).getTime();
+  const ageMs = Date.now() - timestamp;
+  return Number.isFinite(timestamp) && ageMs >= 0 && ageMs <= maxAgeMs;
+}
+
+function preserveRecentIntermittentFeeds(fresh: Dashboard, cached: Dashboard | null): Dashboard {
+  if (!cached) return fresh;
+  const socialCacheIsRecent = isRecentIso(cached.socialTrends.fetchedAt, 48 * 60 * 60 * 1000);
+  const cachedLiquidations = cached.liquidationLevels.filter((item) => isRecentIso(item.asOfDate, 14 * 86_400_000));
+  const socialTrends = {
+    fetchedAt: fresh.socialTrends.coinGeckoStatus === "ok" && fresh.socialTrends.redditStatus === "ok"
+      ? fresh.socialTrends.fetchedAt
+      : socialCacheIsRecent
+        ? cached.socialTrends.fetchedAt
+        : fresh.socialTrends.fetchedAt,
+    coinGeckoStatus: fresh.socialTrends.coinGeckoStatus,
+    redditStatus: fresh.socialTrends.redditStatus,
+    coins: fresh.socialTrends.coinGeckoStatus === "ok"
+      ? fresh.socialTrends.coins
+      : socialCacheIsRecent
+        ? cached.socialTrends.coins
+        : [],
+    redditPosts: fresh.socialTrends.redditStatus === "ok"
+      ? fresh.socialTrends.redditPosts
+      : socialCacheIsRecent
+        ? cached.socialTrends.redditPosts
+        : [],
+  };
+  const useCachedLiquidations = fresh.liquidationLevels.length === 0 && cachedLiquidations.length > 0;
+  return dashboardSchema.parse({
+    ...fresh,
+    socialTrends,
+    liquidationLevels: useCachedLiquidations ? cachedLiquidations : fresh.liquidationLevels,
+    marketIntelligenceStatus: fresh.marketIntelligenceStatus
+      ? {
+        ...fresh.marketIntelligenceStatus,
+        liquidations: useCachedLiquidations ? "unavailable" : fresh.marketIntelligenceStatus.liquidations,
+      }
+      : undefined,
+  });
+}
+
 async function refresh(ctx: Ctx): Promise<DashboardResult> {
   const db = ctx.db<typeof schema>();
   try {
-    const dashboard = await fetchLiveDashboard(ctx);
+    const cached = await latestSnapshot(ctx);
+    const dashboard = preserveRecentIntermittentFeeds(await fetchLiveDashboard(ctx), cached);
     await db.insert(schema.marketSnapshots).values({
       fetchedAt: new Date(dashboard.fetchedAt),
       score: dashboard.score,
@@ -1798,6 +2731,64 @@ async function refresh(ctx: Ctx): Promise<DashboardResult> {
   }
 }
 
+async function refreshSocialTrends(ctx: Ctx): Promise<DashboardResult> {
+  const cached = await latestSnapshot(ctx);
+  if (!cached) return refresh(ctx);
+
+  const fetched = await fetchSocialTrends(ctx);
+  if (fetched.coinGeckoStatus === "unavailable" && fetched.redditStatus === "unavailable") {
+    return {
+      status: "stale",
+      data: cached,
+      message: "Social Trends ရင်းမြစ်နှစ်ခုစလုံးကို ယခုချိတ်ဆက်မရသေးပါ။ နောက်ဆုံးသိမ်းထားသော data ကို ပြထားသည်။",
+      messageEn: "Both Social Trends sources are temporarily unavailable. Showing the latest saved data.",
+    };
+  }
+
+  const socialTrends = {
+    fetchedAt: fetched.coinGeckoStatus === "ok" && fetched.redditStatus === "ok"
+      ? fetched.fetchedAt
+      : cached.socialTrends.fetchedAt,
+    coinGeckoStatus: fetched.coinGeckoStatus,
+    redditStatus: fetched.redditStatus,
+    coins: fetched.coinGeckoStatus === "ok" ? fetched.coins : cached.socialTrends.coins,
+    redditPosts: fetched.redditStatus === "ok" ? fetched.redditPosts : cached.socialTrends.redditPosts,
+  };
+  const dashboard = dashboardSchema.parse({
+    ...cached,
+    fetchedAt: new Date().toISOString(),
+    socialTrends,
+    sources: [...new Set([
+      ...cached.sources,
+      ...(fetched.coinGeckoStatus === "ok" ? ["CoinGecko Trending"] : []),
+      ...(fetched.redditStatus === "ok" ? ["r/CryptoCurrency"] : []),
+    ])],
+  });
+  const db = ctx.db<typeof schema>();
+  await db.insert(schema.marketSnapshots).values({
+    fetchedAt: new Date(dashboard.fetchedAt),
+    score: dashboard.score,
+    sentiment: dashboard.sentiment,
+    payload: JSON.stringify(dashboard),
+  });
+  ctx.invalidateQueries();
+  const bothSourcesOk = fetched.coinGeckoStatus === "ok" && fetched.redditStatus === "ok";
+  return {
+    status: bothSourcesOk ? "ok" : "stale",
+    data: dashboard,
+    message: bothSourcesOk
+      ? null
+      : fetched.coinGeckoStatus === "unavailable"
+        ? "CoinGecko Trending ကို ယခုမရသဖြင့် နောက်ဆုံးသိမ်းထားသော coin စာရင်းကို ပြထားသည်။"
+        : "Reddit public feed ကို ယခုမရသဖြင့် နောက်ဆုံးသိမ်းထားသော discussion များကို ပြထားသည်။",
+    messageEn: bothSourcesOk
+      ? null
+      : fetched.coinGeckoStatus === "unavailable"
+        ? "CoinGecko Trending is unavailable, so the latest saved coin list is shown."
+        : "The Reddit public feed is unavailable, so the latest saved discussions are shown.",
+  };
+}
+
 async function refreshMarketIntelligence(ctx: Ctx): Promise<DashboardResult> {
   const cached = await latestSnapshot(ctx);
   if (!cached) return refresh(ctx);
@@ -1810,7 +2801,9 @@ async function refreshMarketIntelligence(ctx: Ctx): Promise<DashboardResult> {
   ]);
   const derivatives = derivativeRows.length > 0 ? derivativeRows : cached.derivatives;
   const etfFlows = etfFlowResult.status === "unavailable" ? cached.etfFlows : etfFlowResult.items;
-  const liquidationLevels = liquidationResult.status === "unavailable" ? cached.liquidationLevels : liquidationResult.items;
+  const recentCachedLiquidations = cached.liquidationLevels.filter((item) => isRecentIso(item.asOfDate, 14 * 86_400_000));
+  const useCachedLiquidations = liquidationResult.items.length === 0 && recentCachedLiquidations.length > 0;
+  const liquidationLevels = useCachedLiquidations ? recentCachedLiquidations : liquidationResult.items;
   const economicCalendar = calendar.economicStatus === "unavailable" ? cached.economicCalendar : calendar.economicEvents;
   const tokenUnlocks = calendar.unlockStatus === "unavailable" ? cached.tokenUnlocks : calendar.tokenUnlocks;
   const refreshedAt = new Date().toISOString();
@@ -1825,7 +2818,7 @@ async function refreshMarketIntelligence(ctx: Ctx): Promise<DashboardResult> {
     marketIntelligenceStatus: {
       derivatives: derivativeRows.length > 0 ? "ok" : "unavailable",
       etfFlows: etfFlowResult.status,
-      liquidations: liquidationResult.status,
+      liquidations: useCachedLiquidations ? "unavailable" : liquidationResult.status,
       economicCalendar: calendar.economicStatus,
       tokenUnlocks: calendar.unlockStatus,
       refreshedAt,
@@ -1862,6 +2855,31 @@ async function refreshMarketIntelligence(ctx: Ctx): Promise<DashboardResult> {
       messageEn: "Markets sources are temporarily unavailable. Saved data is shown where available.",
     }
     : { status: "ok", data: dashboard, message: null, messageEn: null };
+}
+
+async function getBacktestJournal(ctx: Ctx): Promise<BacktestJournal> {
+  const db = ctx.db<typeof schema>();
+  const [strategyRows, tradeRows] = await Promise.all([
+    db.select().from(schema.backtestStrategies).orderBy(desc(schema.backtestStrategies.createdAt)),
+    db.select().from(schema.backtestTrades).orderBy(desc(schema.backtestTrades.createdAt)),
+  ]);
+  return {
+    strategies: strategyRows.map((strategy) => ({
+      id: strategy.id,
+      name: strategy.name,
+      initialCapital: strategy.initialCapital,
+      drawdownLimitPct: strategy.drawdownLimitPct,
+      commissionUsd: strategy.commissionUsd,
+      createdAt: strategy.createdAt.toISOString(),
+      trades: tradeRows.filter((trade) => trade.strategyId === strategy.id).map((trade) => ({
+        id: trade.id,
+        strategyId: trade.strategyId,
+        result: trade.result,
+        amountUsd: trade.amountUsd,
+        createdAt: trade.createdAt.toISOString(),
+      })),
+    })),
+  };
 }
 
 async function getSettings(ctx: Ctx): Promise<Settings> {
@@ -1953,11 +2971,27 @@ export const Actions = {
     },
   }),
 
+  backfillMarketHistory: defineAction({
+    request: z.object({}),
+    response: historyBackfillResultSchema,
+    async handler(ctx): Promise<HistoryBackfillResult> {
+      return backfillHistory(ctx);
+    },
+  }),
+
   refreshMarketIntelligence: defineAction({
     request: z.object({}),
     response: resultSchema,
     async handler(ctx): Promise<DashboardResult> {
       return refreshMarketIntelligence(ctx);
+    },
+  }),
+
+  refreshSocialTrends: defineAction({
+    request: z.object({}),
+    response: resultSchema,
+    async handler(ctx): Promise<DashboardResult> {
+      return refreshSocialTrends(ctx);
     },
   }),
 
@@ -2149,6 +3183,78 @@ export const Actions = {
     },
   }),
 
+  getBacktestJournal: defineAction({
+    request: z.object({}),
+    response: backtestJournalSchema,
+    async handler(ctx): Promise<BacktestJournal> {
+      return getBacktestJournal(ctx);
+    },
+  }),
+
+  createBacktestStrategy: defineAction({
+    request: z.object({
+      name: z.string().trim().min(1).max(60),
+      initialCapital: z.number().positive().max(1_000_000_000),
+      drawdownLimitPct: z.number().positive().max(100),
+      commissionUsd: z.number().nonnegative().max(1_000_000),
+    }),
+    response: backtestJournalSchema,
+    async handler(ctx, args): Promise<BacktestJournal> {
+      const db = ctx.db<typeof schema>();
+      await db.insert(schema.backtestStrategies).values({
+        name: args.name.trim(),
+        initialCapital: args.initialCapital,
+        drawdownLimitPct: args.drawdownLimitPct,
+        commissionUsd: args.commissionUsd,
+        createdAt: new Date(),
+      });
+      ctx.invalidateQueries();
+      return getBacktestJournal(ctx);
+    },
+  }),
+
+  addBacktestTrade: defineAction({
+    request: z.object({
+      strategyId: z.number().int().positive(),
+      result: z.enum(["win", "loss"]),
+      amountUsd: z.number().positive().max(1_000_000_000),
+    }),
+    response: backtestJournalSchema,
+    async handler(ctx, args): Promise<BacktestJournal> {
+      const db = ctx.db<typeof schema>();
+      const strategies = await db.select().from(schema.backtestStrategies).where(eq(schema.backtestStrategies.id, args.strategyId)).limit(1);
+      if (!strategies[0]) return getBacktestJournal(ctx);
+      await db.insert(schema.backtestTrades).values({ strategyId: args.strategyId, result: args.result, amountUsd: args.amountUsd, createdAt: new Date() });
+      ctx.invalidateQueries();
+      return getBacktestJournal(ctx);
+    },
+  }),
+
+  deleteBacktestTrade: defineAction({
+    request: z.object({ id: z.number().int().positive() }),
+    response: backtestJournalSchema,
+    async handler(ctx, args): Promise<BacktestJournal> {
+      const db = ctx.db<typeof schema>();
+      await db.delete(schema.backtestTrades).where(eq(schema.backtestTrades.id, args.id));
+      ctx.invalidateQueries();
+      return getBacktestJournal(ctx);
+    },
+  }),
+
+  deleteBacktestStrategy: defineAction({
+    request: z.object({ id: z.number().int().positive() }),
+    response: backtestJournalSchema,
+    async handler(ctx, args): Promise<BacktestJournal> {
+      const db = ctx.db<typeof schema>();
+      await db.batch([
+        db.delete(schema.backtestTrades).where(eq(schema.backtestTrades.strategyId, args.id)),
+        db.delete(schema.backtestStrategies).where(eq(schema.backtestStrategies.id, args.id)),
+      ]);
+      ctx.invalidateQueries();
+      return getBacktestJournal(ctx);
+    },
+  }),
+
   getWeeklyMarketDigest: defineAction({
     request: z.object({}),
     response: weeklyDigestResultSchema,
@@ -2166,6 +3272,30 @@ export const Actions = {
     response: weeklyDigestResultSchema,
     async handler(ctx): Promise<WeeklyDigestResult> {
       return createWeeklyMarketDigest(ctx);
+    },
+  }),
+
+  getEmaCrossRadar: defineAction({
+    request: z.object({ timeframe: emaRadarTimeframeSchema }),
+    response: emaCrossRadarResultSchema,
+    async handler(ctx, args): Promise<EmaCrossRadarResult> {
+      return scanEmaCrossRadar(ctx, args.timeframe, "read");
+    },
+  }),
+
+  refreshEmaCrossRadar: defineAction({
+    request: z.object({ timeframe: emaRadarTimeframeSchema }),
+    response: emaCrossRadarResultSchema,
+    async handler(ctx, args): Promise<EmaCrossRadarResult> {
+      return scanEmaCrossRadar(ctx, args.timeframe, "manual");
+    },
+  }),
+
+  runScheduledEmaCrossRadar: defineAction({
+    request: z.object({}),
+    response: emaCrossRadarBatchResultSchema,
+    async handler(ctx): Promise<EmaCrossRadarBatchResult> {
+      return scanAllEmaCrossRadarTimeframes(ctx);
     },
   }),
 

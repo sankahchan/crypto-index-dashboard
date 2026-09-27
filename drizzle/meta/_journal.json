@@ -64,6 +64,34 @@
       "when": 1790327001522,
       "tag": "0009_add_signal_alerts_and_portfolio_benchmark_date",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "6",
+      "when": 1790399529636,
+      "tag": "0010_add_backtest_journal",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "6",
+      "when": 1790511664773,
+      "tag": "0011_enable_requested_alerts",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "6",
+      "when": 1790534412909,
+      "tag": "0012_add_ema_cross_radar_snapshots",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "6",
+      "when": 1790536527341,
+      "tag": "0013_add_timeframe_to_ema_radar_snapshots",
+      "breakpoints": true
     }
   ]
 }

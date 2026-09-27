@@ -4,7 +4,7 @@ Bilingual (Myanmar/English) crypto market dashboard with a transparent market-pu
 
 ## Repository status
 
-> **Snapshot notice (2026-09-28):** this repository is a point-in-time snapshot of the Muse web artifact source (audited, tagged `v1.0.0`). The live artifact has since received newer changes (UI redesign, Position Calculator, Backtest tab, Social Trends, Night Mode fixes) that are **not** in this snapshot. The standalone migration kit below is complete and deployable from this snapshot.
+> **Synced snapshot (2026-09-28):** this repository now matches the current Muse web artifact source, including the neobrutalism redesign, Position Calculator, Backtest journal, Social Trends, multi-timeframe Trading Signals, and EMA Cross Radar. The standalone migration kit below is included for self-hosting.
 
 This repository is the Muse web artifact source plus a checked-in standalone migration kit. The app continues to run on Muse today; pushing this repository to GitHub does not move its database or schedules and does not interrupt the hosted artifact.
 
@@ -14,7 +14,7 @@ The current runtime uses:
 - typed `@hatch/space-sdk` actions on the server
 - SQLite managed by the artifact runtime
 - `ctx.inference.complete` for bilingual summaries, sentiment, daily updates, and weekly digests
-- managed schedules for hourly market refresh, the daily Market Update, and the Monday digest
+- managed schedules for hourly market refresh, the daily Market Update, the Monday digest, and daily multi-timeframe EMA Cross Radar scans
 
 Because `@hatch/space-sdk` is a Muse runtime dependency, the hosted artifact cannot run elsewhere as-is. The `standalone/` runtime in this repo solves that: a Bun + SQLite server that reuses `server/src/actions.ts` verbatim (only its SDK import is rewritten at build time), serves the React client from `client/dist/`, and runs the hourly/daily/weekly schedules in-process. See [Run on a VPS](#run-on-a-vps-one-command) below for the one-command deployment.
 
@@ -95,7 +95,7 @@ The Muse-hosted artifact already receives inference through `ctx.inference`; do 
 - Local runtime databases (`app.db*`), generated bundles, audits, and `.env` files are excluded by `.gitignore`.
 - No user portfolio, watchlist, alert, or notification rows are included in the GitHub-ready source archive.
 - `DATA-PLAN.md` records source provenance and degraded-state behavior.
-- A GitHub repository still needs to be created under the owner's chosen account before this source can be pushed.
+- The repository contains source and migrations only; live user data and Muse-managed schedule state remain outside GitHub.
 
 ## Standalone target checklist
 
