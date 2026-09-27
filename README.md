@@ -4,7 +4,9 @@ Bilingual (Myanmar/English) crypto market dashboard with a transparent market-pu
 
 ## Repository status
 
-This repository is the **current Muse web artifact source** plus a checked-in standalone migration kit. The app continues to run on Muse today; pushing this repository to GitHub does not move its database or schedules and does not interrupt the hosted artifact.
+> **Snapshot notice (2026-09-28):** this repository is a point-in-time snapshot of the Muse web artifact source (audited, tagged `v1.0.0`). The live artifact has since received newer changes (UI redesign, Position Calculator, Backtest tab, Social Trends, Night Mode fixes) that are **not** in this snapshot. The standalone migration kit below is complete and deployable from this snapshot.
+
+This repository is the Muse web artifact source plus a checked-in standalone migration kit. The app continues to run on Muse today; pushing this repository to GitHub does not move its database or schedules and does not interrupt the hosted artifact.
 
 The current runtime uses:
 
