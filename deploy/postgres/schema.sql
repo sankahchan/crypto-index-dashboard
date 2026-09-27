@@ -63,6 +63,7 @@ create table if not exists portfolio_holdings (
   quantity double precision not null check (quantity >= 0),
   average_cost double precision check (average_cost >= 0),
   manual_price double precision check (manual_price >= 0),
+  acquired_on date,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
@@ -72,6 +73,7 @@ create table if not exists notification_preferences (
   price_alerts boolean not null default false,
   market_alerts boolean not null default false,
   weekly_digest boolean not null default false,
+  signal_alerts boolean not null default false,
   updated_at timestamptz not null default now()
 );
 
@@ -82,3 +84,23 @@ create table if not exists weekly_market_digests (
   payload jsonb not null
 );
 create index if not exists weekly_market_digests_generated_at_idx on weekly_market_digests (generated_at desc);
+
+create table if not exists trading_signal_events (
+  id bigint generated always as identity primary key,
+  symbol text not null,
+  previous_verdict text not null,
+  new_verdict text not null,
+  confidence integer not null,
+  triggered_at timestamptz not null,
+  dismissed boolean not null default false
+);
+create index if not exists trading_signal_events_triggered_at_idx on trading_signal_events (triggered_at desc);
+
+create table if not exists trading_signal_snapshots (
+  id bigint generated always as identity primary key,
+  symbol text not null,
+  generated_at timestamptz not null,
+  market_as_of timestamptz not null,
+  payload jsonb not null
+);
+create index if not exists trading_signal_snapshots_symbol_generated_at_idx on trading_signal_snapshots (symbol, generated_at desc);

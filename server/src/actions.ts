@@ -581,13 +581,13 @@ function sentimentFor(score: number) {
 }
 
 async function fetchJson(url: string): Promise<unknown> {
-  const response = await fetch(url, { headers: HEADERS });
+  const response = await fetch(url, { headers: HEADERS, signal: AbortSignal.timeout(20_000) });
   if (!response.ok) throw new Error(`Market source returned HTTP ${response.status}`);
   return response.json();
 }
 
 async function fetchText(url: string): Promise<string> {
-  const response = await fetch(url, { headers: HEADERS });
+  const response = await fetch(url, { headers: HEADERS, signal: AbortSignal.timeout(20_000) });
   if (!response.ok) throw new Error(`News source returned HTTP ${response.status}`);
   return response.text();
 }
@@ -1488,10 +1488,11 @@ function buildReferenceLevels(dashboard: Dashboard) {
   if (!btc) throw new Error("Bitcoin quote is unavailable");
   const closes = dashboard.history.map((point) => point.btcPrice).filter(Number.isFinite);
   const recent = closes.slice(-7);
+  const last30 = closes.slice(-30);
   return {
     sevenDayLow: recent.length > 0 ? Math.min(...recent) : btc.price,
-    thirtyDayLow: closes.length > 0 ? Math.min(...closes) : btc.price,
-    thirtyDayHigh: closes.length > 0 ? Math.max(...closes) : btc.price,
+    thirtyDayLow: last30.length > 0 ? Math.min(...last30) : btc.price,
+    thirtyDayHigh: last30.length > 0 ? Math.max(...last30) : btc.price,
   };
 }
 

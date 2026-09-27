@@ -35,10 +35,11 @@ interface ErrorBody {
 function toErrorBody(err: unknown): ErrorBody {
   if (typeof err === "object" && err !== null && "code" in err && typeof (err as AIError).code === "string") {
     const coded = err as AIError;
-    return { code: coded.code ?? "UNKNOWN", message: err instanceof Error ? err.message : String(err) };
+    // Keep the machine-readable code, but don't leak raw error text
+    // (it can contain SQL fragments or file paths) to API clients.
+    return { code: coded.code ?? "UNKNOWN", message: "Request failed" };
   }
-  const message = err instanceof Error ? err.message : String(err);
-  return { code: "ACTION_FAILED", message };
+  return { code: "ACTION_FAILED", message: "Internal error" };
 }
 
 function json(data: unknown, status = 200): Response {
@@ -118,7 +119,12 @@ function safeJoin(base: string, rel: string): string | null {
 }
 
 async function serveStatic(pathname: string): Promise<Response | null> {
-  let rel = decodeURIComponent(pathname);
+  let rel: string;
+  try {
+    rel = decodeURIComponent(pathname);
+  } catch {
+    return null;
+  }
   if (rel === "" || rel.endsWith("/")) rel += "index.html";
   const filePath = safeJoin(DIST, rel.replace(/^\/+/, ""));
   if (!filePath) return null;

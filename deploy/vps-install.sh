@@ -75,6 +75,16 @@ cd "$APP_DIR"
 if [ ! -f .env ]; then
   log "Creating .env from .env.example — add your API keys there if you want AI/news features."
   cp .env.example .env
+  # The shipped .env.example contains a publicly-known CRON_SECRET placeholder.
+  # Replace it with a random secret so /api/refresh/* can't be triggered by
+  # anyone who read the public repo.
+  if command -v openssl >/dev/null 2>&1; then
+    cron_secret="$(openssl rand -hex 32)"
+  else
+    cron_secret="$(head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n')"
+  fi
+  sed -i "s/^CRON_SECRET=.*/CRON_SECRET=${cron_secret}/" .env
+  log "Generated a random CRON_SECRET in .env."
 else
   log ".env already exists — leaving it untouched."
 fi
