@@ -27,3 +27,7 @@ app.db-wal
 .idea/
 *.log
 *.tsbuildinfo
+
+# TypeScript build info (all variants)
+*.tsbuildinfo.*
+.tsbuildinfo*
